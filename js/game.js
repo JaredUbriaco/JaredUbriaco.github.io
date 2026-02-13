@@ -8,7 +8,7 @@
     let lastTime = 0;
     let accumulated = 0;
     let paused = false;
-    let speedIndex = 1;
+    let speedIndex = 0;
     const SPEEDS = [0.5, 1, 2];
     let ui = null;
     let aiCooldown = 0;
