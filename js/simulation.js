@@ -30,7 +30,7 @@ function findNearest(entity, entities, type) {
     let nearestDist = Infinity;
     for (const e of entities) {
         if (e.type !== type) continue;
-        if (type === ENTITY_TYPES.MINERAL_PATCH && (!e.minerals || e.minerals <= 0)) continue;
+        if (type === ENTITY_TYPES.MINERAL_PATCH && (!e.minerals || e.minerals < (UNITS[ENTITY_TYPES.SCV].mineralsPerTrip || 5))) continue;
         const d = distance(entity.gridX, entity.gridY, e.gridX, e.gridY);
         if (d < nearestDist) {
             nearestDist = d;
@@ -76,24 +76,24 @@ function updateEntity(entity, entities, map, deltaTime) {
 }
 
 function updateSCV(scv, entities, map, deltaTime) {
-    const speed = scv.moveSpeed * (deltaTime / 1000) * 5;
     const def = UNITS[ENTITY_TYPES.SCV];
+    const dtSec = deltaTime / 1000;
+    const speed = scv.moveSpeed * dtSec;
 
-    if (scv.state === 'returning' && scv.cargo > 0) {
+    if (scv.state === 'returning') {
         const cc = entities.find(e => e.type === ENTITY_TYPES.COMMAND_CENTER);
         if (!cc) {
             scv.state = 'idle';
-            scv.cargo = 0;
             return;
         }
         const dx = cc.gridX + cc.width / 2 - scv.gridX;
         const dy = cc.gridY + cc.height / 2 - scv.gridY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 0.5) {
-            map.minerals += scv.cargo;
-            map.mineralsCollected += scv.cargo;
-            scv.cargo = 0;
+        if (dist < 0.4) {
+            map.minerals += def.mineralsPerTrip;
+            map.mineralsCollected += def.mineralsPerTrip;
             scv.state = 'idle';
+            scv.targetId = null;
             return;
         }
         scv.gridX += (dx / dist) * speed;
@@ -101,24 +101,31 @@ function updateSCV(scv, entities, map, deltaTime) {
         return;
     }
 
-    if (scv.state === 'gathering' && scv.cargo < scv.cargoCapacity) {
-        const target = entities.find(e => e.id === scv.targetId);
-        if (!target || target.minerals <= 0) {
+    if (scv.state === 'mining') {
+        scv.miningProgress = (scv.miningProgress || 0) + dtSec;
+        if (scv.miningProgress >= def.miningTimeSeconds) {
+            scv.miningProgress = 0;
+            scv.state = 'returning';
+            scv.targetId = null;
+        }
+        return;
+    }
+
+    if (scv.state === 'moving_to_mineral') {
+        const patch = entities.find(e => e.id === scv.targetId);
+        if (!patch || patch.minerals < def.mineralsPerTrip) {
             scv.state = 'idle';
             scv.targetId = null;
             return;
         }
-        const dx = target.gridX - scv.gridX;
-        const dy = target.gridY - scv.gridY;
+        const dx = patch.gridX - scv.gridX;
+        const dy = patch.gridY - scv.gridY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 0.6) {
-            const gathered = Math.min(def.gatherRate * (deltaTime / 16), target.minerals, scv.cargoCapacity - scv.cargo);
-            target.minerals -= gathered;
-            scv.cargo += gathered;
-            if (scv.cargo >= scv.cargoCapacity || target.minerals <= 0) {
-                scv.state = 'returning';
-                scv.targetId = null;
-            }
+        if (dist < 0.5) {
+            scv.state = 'mining';
+            scv.miningProgress = 0;
+            patch.minerals -= def.mineralsPerTrip;
+            if (patch.minerals < 0) patch.minerals = 0;
             return;
         }
         scv.gridX += (dx / dist) * speed;
@@ -130,7 +137,7 @@ function updateSCV(scv, entities, map, deltaTime) {
         const patch = findNearest(scv, entities, ENTITY_TYPES.MINERAL_PATCH);
         if (patch) {
             scv.targetId = patch.id;
-            scv.state = 'gathering';
+            scv.state = 'moving_to_mineral';
         }
     }
 }

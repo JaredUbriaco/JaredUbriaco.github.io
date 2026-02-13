@@ -109,11 +109,20 @@ function drawSCV(entity, ox, oy) {
     const { x, y } = worldToScreen(entity.gridX, entity.gridY);
     const sx = x + ox;
     const sy = y + oy;
-    ctx.fillStyle = COLORS.scv;
+    ctx.fillStyle = entity.state === 'mining' ? '#f0883e' : COLORS.scv;
     ctx.beginPath();
     ctx.arc(sx, sy, 6, 0, Math.PI * 2);
     ctx.fill();
-    if (entity.cargo > 0) {
+    if (entity.state === 'mining') {
+        const p = (entity.miningProgress || 0) / (UNITS[ENTITY_TYPES.SCV].miningTimeSeconds || 2);
+        ctx.fillStyle = COLORS.mineral;
+        ctx.globalAlpha = 0.5 + p * 0.5;
+        ctx.beginPath();
+        ctx.arc(sx, sy - 5, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+    if (entity.state === 'returning') {
         ctx.fillStyle = COLORS.mineral;
         ctx.globalAlpha = 0.8;
         ctx.beginPath();

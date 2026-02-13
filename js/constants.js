@@ -69,8 +69,9 @@ const UNITS = {
         cost: { minerals: 50 },
         buildTime: 12,
         supplyCost: 1,
-        cargoCapacity: 8,
-        gatherRate: 0.5,
+        mineralsPerTrip: 5,
+        miningTimeSeconds: 2,
+        moveSpeed: 12,
     },
     [ENTITY_TYPES.MARINE]: {
         name: 'Marine',

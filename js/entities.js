@@ -32,11 +32,10 @@ function createEntity(type, gridX, gridY, overrides = {}) {
         return Object.assign(base, {
             targetX: null,
             targetY: null,
-            state: 'idle', // idle, moving, gathering, returning
-            cargo: 0,
-            cargoCapacity: def.cargoCapacity,
-            moveSpeed: 2,
-            progress: 0,
+            targetId: null,
+            state: 'idle', // idle, moving_to_mineral, mining, returning
+            miningProgress: 0,
+            moveSpeed: def.moveSpeed,
         }, overrides);
     }
 
