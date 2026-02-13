@@ -3,13 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>jaredubriaco.github.io</title>
+    <title>Colony Sim — jaredubriaco.github.io</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Hello World</h1>
-        <p>Welcome to my GitHub Pages site.</p>
+    <header class="game-header">
+        <div class="logo">COLONY SIM</div>
+        <div class="resource-panel">
+            <span class="resource" data-resource="minerals"><span class="resource-icon">◆</span> <span class="resource-value" id="minerals">0</span></span>
+            <span class="resource" data-resource="vespene"><span class="resource-icon">◇</span> <span class="resource-value" id="vespene">0</span></span>
+            <span class="resource" data-resource="supply"><span class="resource-icon">▣</span> <span class="resource-value" id="supply">6/6</span></span>
+        </div>
+        <div class="game-controls">
+            <button id="btn-pause" class="btn-icon" title="Pause">⏸</button>
+            <button id="btn-speed" class="btn-icon" title="Speed">1x</button>
+        </div>
+    </header>
+
+    <main class="game-main">
+        <canvas id="game-canvas"></canvas>
+        <div class="selection-panel" id="selection-panel">
+            <div class="panel-title">SELECTION</div>
+            <div id="selection-info">—</div>
+            <div id="build-menu" class="build-menu"></div>
+        </div>
+    </main>
+
+    <footer class="game-footer">
+        <div class="status-readout">
+            <span id="status-text">Initializing...</span>
+        </div>
+    </footer>
+
+    <div id="win-overlay" class="win-overlay hidden">
+        <div class="win-box">
+            <h2>VICTORY</h2>
+            <p>Colony established. End game reached.</p>
+        </div>
     </div>
+
+    <script src="js/constants.js"></script>
+    <script src="js/entities.js"></script>
+    <script src="js/simulation.js"></script>
+    <script src="js/render.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/game.js"></script>
 </body>
 </html>

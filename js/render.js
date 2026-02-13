@@ -1,0 +1,184 @@
+/**
+ * Isometric rendering. Programmatic shapes, sprite-ready.
+ */
+
+const COLORS = {
+    grid: 'rgba(88, 166, 255, 0.08)',
+    mineral: '#58a6ff',
+    mineralDepleted: '#30363d',
+    vespene: '#3fb950',
+    commandCenter: '#8b949e',
+    commandCenterAccent: '#58a6ff',
+    barracks: '#6e7681',
+    supplyDepot: '#484f58',
+    scv: '#d29922',
+    marine: '#a371f7',
+    selection: 'rgba(88, 166, 255, 0.6)',
+    buildingConstruct: 'rgba(210, 153, 34, 0.4)',
+};
+
+let canvas, ctx;
+let cameraOffsetX = 0;
+let cameraOffsetY = 0;
+
+function initRender(c) {
+    canvas = c;
+    ctx = c.getContext('2d');
+}
+
+function getRenderOffset() {
+    const mapPixelW = (CONFIG.MAP_COLS + CONFIG.MAP_ROWS) * (CONFIG.TILE_WIDTH / 2);
+    const mapPixelH = (CONFIG.MAP_COLS + CONFIG.MAP_ROWS) * (CONFIG.TILE_HEIGHT / 2);
+    return {
+        x: (canvas.width - mapPixelW) / 2 + cameraOffsetX,
+        y: 40 + cameraOffsetY,
+    };
+}
+
+function drawIsometricTile(gridX, gridY, color, ox, oy) {
+    const { x, y } = worldToScreen(gridX, gridY);
+    const sx = x + ox;
+    const sy = y + oy;
+    const tw = CONFIG.TILE_WIDTH;
+    const th = CONFIG.TILE_HEIGHT;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy + th / 2);
+    ctx.lineTo(sx + tw / 2, sy);
+    ctx.lineTo(sx + tw, sy + th / 2);
+    ctx.lineTo(sx + tw / 2, sy + th);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(48, 54, 61, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+}
+
+function drawMineralPatch(entity, ox, oy) {
+    const { x, y } = worldToScreen(entity.gridX, entity.gridY);
+    const sx = x + ox + CONFIG.TILE_WIDTH / 4;
+    const sy = y + oy + CONFIG.TILE_HEIGHT / 4;
+    const remaining = entity.minerals / 1500;
+    ctx.fillStyle = remaining > 0 ? COLORS.mineral : COLORS.mineralDepleted;
+    ctx.globalAlpha = 0.6 + remaining * 0.4;
+    ctx.beginPath();
+    ctx.arc(sx, sy, CONFIG.TILE_WIDTH / 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+}
+
+function drawBuilding(entity, ox, oy) {
+    const def = BUILDINGS[entity.type];
+    if (!def) return;
+    const w = (def.width || 1) * (CONFIG.TILE_WIDTH / 2);
+    const h = (def.height || 1) * (CONFIG.TILE_HEIGHT / 2);
+    const { x, y } = worldToScreen(entity.gridX + (def.width || 1) / 2, entity.gridY + (def.height || 1) / 2);
+    const sx = x + ox - w / 2;
+    const sy = y + oy - h / 2;
+
+    let fill = COLORS.commandCenter;
+    if (entity.type === ENTITY_TYPES.BARRACKS) fill = COLORS.barracks;
+    if (entity.type === ENTITY_TYPES.SUPPLY_DEPOT) fill = COLORS.supplyDepot;
+    if (entity.type === ENTITY_TYPES.REFINERY) fill = COLORS.vespene;
+
+    if (entity.buildProgress < 100) {
+        ctx.fillStyle = COLORS.buildingConstruct;
+        ctx.fillRect(sx, sy, w, h);
+        ctx.fillStyle = fill;
+        ctx.globalAlpha = 0.5;
+        ctx.fillRect(sx, sy, w * (entity.buildProgress / 100), h);
+        ctx.globalAlpha = 1;
+    } else {
+        ctx.fillStyle = fill;
+        ctx.fillRect(sx, sy, w, h);
+        ctx.strokeStyle = COLORS.commandCenterAccent;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sx, sy, w, h);
+    }
+
+    if (entity.selected) {
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(sx - 2, sy - 2, w + 4, h + 4);
+    }
+}
+
+function drawSCV(entity, ox, oy) {
+    const { x, y } = worldToScreen(entity.gridX, entity.gridY);
+    const sx = x + ox;
+    const sy = y + oy;
+    ctx.fillStyle = COLORS.scv;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+    ctx.fill();
+    if (entity.cargo > 0) {
+        ctx.fillStyle = COLORS.mineral;
+        ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        ctx.arc(sx, sy - 4, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+    if (entity.selected) {
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+}
+
+function drawMarine(entity, ox, oy) {
+    const { x, y } = worldToScreen(entity.gridX, entity.gridY);
+    const sx = x + ox;
+    const sy = y + oy;
+    ctx.fillStyle = COLORS.marine;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+    ctx.fill();
+    if (entity.selected) {
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 7, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+}
+
+function render(state) {
+    if (!canvas || !ctx) return;
+    const { entities } = state;
+    const ox = getRenderOffset().x;
+    const oy = getRenderOffset().y;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (let row = 0; row < CONFIG.MAP_ROWS; row++) {
+        for (let col = 0; col < CONFIG.MAP_COLS; col++) {
+            drawIsometricTile(col, row, COLORS.grid, ox, oy);
+        }
+    }
+
+    const drawOrder = entities
+        .filter(e => e.type !== ENTITY_TYPES.MINERAL_PATCH && e.type !== ENTITY_TYPES.VESPENE_GEYSER)
+        .sort((a, b) => {
+            const ax = a.gridX + ((a.width || 1) / 2);
+            const ay = a.gridY + ((a.height || 1) / 2);
+            const bx = b.gridX + ((b.width || 1) / 2);
+            const by = b.gridY + ((b.height || 1) / 2);
+            return (ax + ay) - (bx + by);
+        });
+
+    entities.filter(e => e.type === ENTITY_TYPES.MINERAL_PATCH).forEach(e => drawMineralPatch(e, ox, oy));
+
+    drawOrder.forEach(e => {
+        if (e.type === ENTITY_TYPES.COMMAND_CENTER || e.type === ENTITY_TYPES.BARRACKS ||
+            e.type === ENTITY_TYPES.SUPPLY_DEPOT || e.type === ENTITY_TYPES.REFINERY) {
+            drawBuilding(e, ox, oy);
+        } else if (e.type === ENTITY_TYPES.SCV) {
+            drawSCV(e, ox, oy);
+        } else if (e.type === ENTITY_TYPES.MARINE) {
+            drawMarine(e, ox, oy);
+        }
+    });
+}
