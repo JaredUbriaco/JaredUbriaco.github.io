@@ -20,19 +20,60 @@
         canvas.height = main.clientHeight;
     }
 
-    function getEntityAt(gridX, gridY) {
-        for (let i = state.entities.length - 1; i >= 0; i--) {
-            const e = state.entities[i];
-            const w = e.width || 1;
-            const h = e.height || 1;
-            if (gridX >= e.gridX && gridX < e.gridX + w && gridY >= e.gridY && gridY < e.gridY + h) {
-                return e;
+    function getEntityAtScreen(canvasX, canvasY) {
+        const offset = getRenderOffset();
+        const worldClick = screenToWorld(canvasX - offset.x, canvasY - offset.y, 0, 0);
+        const clickGridX = worldClick.gridX;
+        const clickGridY = worldClick.gridY;
+        const SELECT_RADIUS = 14;
+
+        const selectable = state.entities
+            .filter(e => e.type !== ENTITY_TYPES.MINERAL_PATCH && e.type !== ENTITY_TYPES.VESPENE_GEYSER)
+            .sort((a, b) => {
+                const ad = (a.gridX || 0) + (a.gridY || 0) + ((a.width || 1) / 2) + ((a.height || 1) / 2);
+                const bd = (b.gridX || 0) + (b.gridY || 0) + ((b.width || 1) / 2) + ((b.height || 1) / 2);
+                return bd - ad;
+            });
+        for (const e of selectable) {
+            if (e.width && e.height) {
+                if (clickGridX >= e.gridX && clickGridX < e.gridX + e.width &&
+                    clickGridY >= e.gridY && clickGridY < e.gridY + e.height) {
+                    return e;
+                }
+            } else if (e.type === ENTITY_TYPES.SCV || e.type === ENTITY_TYPES.MARINE) {
+                const screenPos = worldToScreen(e.gridX, e.gridY);
+                const unitSx = screenPos.x + offset.x;
+                const unitSy = screenPos.y + offset.y;
+                const dist = Math.sqrt((canvasX - unitSx) ** 2 + (canvasY - unitSy) ** 2);
+                if (dist <= SELECT_RADIUS) return e;
             }
-            if (!e.width && e.gridX === Math.floor(gridX) && e.gridY === Math.floor(gridY)) {
-                return e;
+        }
+        for (const e of state.entities) {
+            if (e.type === ENTITY_TYPES.MINERAL_PATCH || e.type === ENTITY_TYPES.VESPENE_GEYSER) {
+                const screenPos = worldToScreen(e.gridX, e.gridY);
+                const sx = screenPos.x + offset.x + CONFIG.TILE_WIDTH / 4;
+                const sy = screenPos.y + offset.y + CONFIG.TILE_HEIGHT / 4;
+                const dist = Math.sqrt((canvasX - sx) ** 2 + (canvasY - sy) ** 2);
+                if (dist <= SELECT_RADIUS) return e;
             }
         }
         return null;
+    }
+
+    function getUnitsInBox(sx1, sy1, sx2, sy2) {
+        const offset = getRenderOffset();
+        const units = state.entities.filter(e =>
+            e.type === ENTITY_TYPES.SCV || e.type === ENTITY_TYPES.MARINE);
+        const minX = Math.min(sx1, sx2);
+        const maxX = Math.max(sx1, sx2);
+        const minY = Math.min(sy1, sy2);
+        const maxY = Math.max(sy1, sy2);
+        return units.filter(e => {
+            const screenPos = worldToScreen(e.gridX, e.gridY);
+            const ux = screenPos.x + offset.x;
+            const uy = screenPos.y + offset.y;
+            return ux >= minX && ux <= maxX && uy >= minY && uy <= maxY;
+        });
     }
 
     function buildUnit(building, unitType) {
@@ -84,7 +125,7 @@
         }
 
         initRender(canvas);
-        render(state);
+        render(state, ui ? ui.getBoxSelect() : null);
         if (ui) {
             ui.updateResourceUI(state.map);
             ui.updateSelectionPanel();
@@ -104,19 +145,21 @@
     initRender(canvas);
     ui = initUI({
         state,
-        getEntityAt,
+        getEntityAtScreen,
+        getUnitsInBox,
         buildUnit,
         togglePause,
         cycleSpeed,
     });
 
-    if (ui) ui.setStatus('Colony operational. SCVs gathering minerals.');
+    if (ui) ui.setStatus('Colony operational. Drag to select • Right-click to move • Alt+drag or middle-mouse to pan');
 
     requestAnimationFrame(tick);
 
     window.game = {
         get state() { return state; },
-        getEntityAt,
+        getEntityAtScreen,
+        getUnitsInBox,
         buildUnit,
         togglePause,
         cycleSpeed,

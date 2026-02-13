@@ -2,16 +2,18 @@
  * UI updates and input handling.
  */
 
-let selectedEntity = null;
+let selectedEntities = [];
 let gameInstance = null;
+let boxSelectStart = null;
+let boxSelectCurrent = null;
+let lastWasBoxSelect = false;
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
 
 function initUI(game) {
     gameInstance = game;
     const canvas = document.getElementById('game-canvas');
-    let isDragging = false;
-    let didDrag = false;
-    let lastMouseX = 0;
-    let lastMouseY = 0;
     const panel = document.getElementById('selection-panel');
     const info = document.getElementById('selection-info');
     const buildMenu = document.getElementById('build-menu');
@@ -20,6 +22,16 @@ function initUI(game) {
     const btnPause = document.getElementById('btn-pause');
     const btnSpeed = document.getElementById('btn-speed');
 
+    function getCanvasCoords(e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return {
+            x: (e.clientX - rect.left) * scaleX,
+            y: (e.clientY - rect.top) * scaleY,
+        };
+    }
+
     function updateResourceUI(map) {
         document.getElementById('minerals').textContent = Math.floor(map.minerals);
         document.getElementById('vespene').textContent = Math.floor(map.vespene);
@@ -27,98 +39,156 @@ function initUI(game) {
     }
 
     function updateSelectionPanel() {
-        if (!selectedEntity) {
+        if (selectedEntities.length === 0) {
             info.textContent = '—';
             buildMenu.innerHTML = '';
             return;
         }
-        const e = selectedEntity;
-        let name = e.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-        if (UNITS[e.type]) name = UNITS[e.type].name;
-        if (BUILDINGS[e.type]) name = BUILDINGS[e.type].name;
-        info.textContent = name;
+        const first = selectedEntities[0];
+        const units = selectedEntities.filter(e =>
+            e.type === ENTITY_TYPES.SCV || e.type === ENTITY_TYPES.MARINE);
+        const buildings = selectedEntities.filter(e =>
+            BUILDINGS[e.type]);
+
+        if (units.length === selectedEntities.length && units.length > 1) {
+            const scvCount = units.filter(u => u.type === ENTITY_TYPES.SCV).length;
+            const marineCount = units.filter(u => u.type === ENTITY_TYPES.MARINE).length;
+            const parts = [];
+            if (scvCount) parts.push(`${scvCount} SCV${scvCount > 1 ? 's' : ''}`);
+            if (marineCount) parts.push(`${marineCount} Marine${marineCount > 1 ? 's' : ''}`);
+            info.textContent = parts.join(', ');
+        } else if (first.type === ENTITY_TYPES.SCV || first.type === ENTITY_TYPES.MARINE) {
+            info.textContent = UNITS[first.type].name;
+        } else if (BUILDINGS[first.type]) {
+            info.textContent = BUILDINGS[first.type].name;
+        } else {
+            info.textContent = first.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
 
         buildMenu.innerHTML = '';
-        const def = BUILDINGS[e.type];
-        if (def && def.produces && e.buildProgress >= 100) {
-            def.produces.forEach(unitType => {
-                const unitDef = UNITS[unitType];
-                if (!unitDef) return;
-                const cost = unitDef.cost;
-                const canAfford = gameInstance && canAfford(gameInstance.state.map, cost);
-                const hasSupply = gameInstance && hasSupplySpace(gameInstance.state.map, unitDef.supplyCost || 0);
-                const btn = document.createElement('button');
-                btn.className = 'build-btn';
-                btn.textContent = `${unitDef.name} (${cost.minerals}M)`;
-                btn.disabled = !canAfford || !hasSupply;
-                btn.onclick = () => {
-                    if (gameInstance && canAfford && hasSupply) {
-                        gameInstance.buildUnit(e, unitType);
-                        updateSelectionPanel();
-                    }
-                };
-                buildMenu.appendChild(btn);
-            });
+        if (buildings.length === 1 && buildings[0].buildProgress >= 100) {
+            const def = BUILDINGS[buildings[0].type];
+            if (def && def.produces) {
+                def.produces.forEach(unitType => {
+                    const unitDef = UNITS[unitType];
+                    if (!unitDef) return;
+                    const cost = unitDef.cost;
+                    const canAfford = gameInstance && canAfford(gameInstance.state.map, cost);
+                    const hasSupply = gameInstance && hasSupplySpace(gameInstance.state.map, unitDef.supplyCost || 0);
+                    const btn = document.createElement('button');
+                    btn.className = 'build-btn';
+                    btn.textContent = `${unitDef.name} (${cost.minerals}M)`;
+                    btn.disabled = !canAfford || !hasSupply;
+                    btn.onclick = () => {
+                        if (gameInstance && canAfford && hasSupply) {
+                            gameInstance.buildUnit(buildings[0], unitType);
+                            updateSelectionPanel();
+                        }
+                    };
+                    buildMenu.appendChild(btn);
+                });
+            }
+        } else if (units.length > 0) {
+            const hint = document.createElement('div');
+            hint.className = 'panel-title';
+            hint.style.marginTop = '0.5rem';
+            hint.textContent = 'Right-click to move';
+            hint.style.color = 'var(--text-muted)';
+            hint.style.fontSize = '0.7rem';
+            buildMenu.appendChild(hint);
         }
     }
 
     canvas.addEventListener('mousedown', (e) => {
-        if (e.button === 0) {
-            isDragging = true;
-            didDrag = false;
-            lastMouseX = e.clientX;
-            lastMouseY = e.clientY;
+        const pos = getCanvasCoords(e);
+        if (e.button === 1 || (e.button === 0 && e.altKey)) {
+            isPanning = true;
+            panStartX = e.clientX - camera.x;
+            panStartY = e.clientY - camera.y;
+        } else if (e.button === 0 && !e.altKey) {
+            boxSelectStart = { x: pos.x, y: pos.y };
+            boxSelectCurrent = null;
         }
     });
 
     canvas.addEventListener('mousemove', (e) => {
-        if (isDragging && e.buttons === 1) {
-            const dx = e.clientX - lastMouseX;
-            const dy = e.clientY - lastMouseY;
-            if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDrag = true;
-            camera.x += dx;
-            camera.y += dy;
-            lastMouseX = e.clientX;
-            lastMouseY = e.clientY;
+        const pos = getCanvasCoords(e);
+        if (isPanning && (e.buttons === 4 || (e.buttons === 1 && e.altKey))) {
+            camera.x = e.clientX - panStartX;
+            camera.y = e.clientY - panStartY;
+        } else if (boxSelectStart && e.buttons === 1 && !e.altKey) {
+            boxSelectCurrent = { x: pos.x, y: pos.y };
         }
     });
 
     canvas.addEventListener('mouseup', (e) => {
-        if (e.button === 0) isDragging = false;
+        if (e.button === 1 || isPanning) {
+            isPanning = false;
+            if (e.button === 1) return;
+        }
+        if (e.button === 0 && boxSelectStart) {
+            const pos = getCanvasCoords(e);
+            const dx = Math.abs(pos.x - boxSelectStart.x);
+            const dy = Math.abs(pos.y - boxSelectStart.y);
+            if (dx > 5 || dy > 5) {
+                lastWasBoxSelect = true;
+                const units = gameInstance.getUnitsInBox(
+                    boxSelectStart.x, boxSelectStart.y,
+                    pos.x, pos.y);
+                gameInstance.state.entities.forEach(entity => {
+                    entity.selected = units.includes(entity);
+                });
+                selectedEntities = units;
+                updateSelectionPanel();
+            }
+            boxSelectStart = null;
+            boxSelectCurrent = null;
+        }
     });
 
     canvas.addEventListener('mouseleave', () => {
-        isDragging = false;
+        isPanning = false;
+        boxSelectStart = null;
+        boxSelectCurrent = null;
     });
 
     canvas.addEventListener('click', (e) => {
-        if (didDrag) {
-            didDrag = false;
+        if (!gameInstance || e.button !== 0) return;
+        if (lastWasBoxSelect) {
+            lastWasBoxSelect = false;
             return;
         }
-        if (!gameInstance) return;
-        const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        const cx = (e.clientX - rect.left) * scaleX;
-        const cy = (e.clientY - rect.top) * scaleY;
-        const offset = getRenderOffset();
-        const { gridX, gridY } = screenToWorld(cx - offset.x, cy - offset.y, 0, 0);
+        const pos = getCanvasCoords(e);
+        const dx = boxSelectStart ? Math.abs(pos.x - boxSelectStart.x) : 0;
+        const dy = boxSelectStart ? Math.abs(pos.y - boxSelectStart.y) : 0;
+        if ((boxSelectStart && (dx > 5 || dy > 5))) return;
 
-        if (e.button === 2) {
-            if (selectedEntity && (selectedEntity.type === ENTITY_TYPES.SCV || selectedEntity.type === ENTITY_TYPES.MARINE)) {
-                selectedEntity.targetX = gridX;
-                selectedEntity.targetY = gridY;
-                selectedEntity.state = 'moving';
-            }
-            return;
+        const entity = gameInstance.getEntityAtScreen(pos.x, pos.y);
+        gameInstance.state.entities.forEach(en => { en.selected = false; });
+        if (entity) {
+            entity.selected = true;
+            selectedEntities = [entity];
+        } else {
+            selectedEntities = [];
         }
-        selectedEntity = gameInstance.getEntityAt(gridX, gridY);
-        gameInstance.state.entities.forEach(entity => entity.selected = entity === selectedEntity);
         updateSelectionPanel();
     });
 
-    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    canvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (!gameInstance) return;
+        const pos = getCanvasCoords(e);
+        const offset = getRenderOffset();
+        const { gridX, gridY } = screenToWorld(pos.x - offset.x, pos.y - offset.y, 0, 0);
+
+        const movableUnits = selectedEntities.filter(u =>
+            u.type === ENTITY_TYPES.SCV || u.type === ENTITY_TYPES.MARINE);
+        movableUnits.forEach(u => {
+            u.targetX = gridX;
+            u.targetY = gridY;
+            u.state = 'moving';
+        });
+    });
 
     btnPause.addEventListener('click', () => {
         if (gameInstance) gameInstance.togglePause();
@@ -128,10 +198,17 @@ function initUI(game) {
         if (gameInstance) gameInstance.cycleSpeed();
     });
 
+    window.uiState = {
+        boxSelectStart,
+        boxSelectCurrent: () => boxSelectCurrent,
+        setBoxSelectCurrent: (v) => { boxSelectCurrent = v; },
+    };
+
     return {
         updateResourceUI,
         updateSelectionPanel,
         setStatus: (text) => { statusText.textContent = text; },
         showWin: () => { winOverlay.classList.remove('hidden'); },
+        getBoxSelect: () => ({ start: boxSelectStart, current: boxSelectCurrent }),
     };
 }

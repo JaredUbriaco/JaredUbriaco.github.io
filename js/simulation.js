@@ -69,13 +69,14 @@ function updateEntity(entity, entities, map, deltaTime) {
         updateMarine(entity, deltaTime);
         return;
     }
-    if (entity.type === ENTITY_TYPES.COMMAND_CENTER || entity.type === ENTITY_TYPES.BARRACKS) {
+    if (entity.type === ENTITY_TYPES.COMMAND_CENTER || entity.type === ENTITY_TYPES.BARRACKS ||
+        entity.type === ENTITY_TYPES.SUPPLY_DEPOT || entity.type === ENTITY_TYPES.REFINERY) {
         updateBuilding(entity, entities, map, deltaTime);
     }
 }
 
 function updateSCV(scv, entities, map, deltaTime) {
-    const speed = scv.moveSpeed * (deltaTime / 16);
+    const speed = scv.moveSpeed * (deltaTime / 1000) * 5;
     const def = UNITS[ENTITY_TYPES.SCV];
 
     if (scv.state === 'returning' && scv.cargo > 0) {
@@ -136,7 +137,7 @@ function updateSCV(scv, entities, map, deltaTime) {
 
 function updateMarine(marine, deltaTime) {
     if (marine.state === 'moving' && marine.targetX !== null) {
-        const speed = marine.moveSpeed * (deltaTime / 16);
+        const speed = marine.moveSpeed * (deltaTime / 1000) * 6;
         const dx = marine.targetX - marine.gridX;
         const dy = marine.targetY - marine.gridY;
         const dist = Math.sqrt(dx * dx + dy * dy);

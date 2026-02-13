@@ -147,13 +147,27 @@ function drawMarine(entity, ox, oy) {
     }
 }
 
-function render(state) {
+function render(state, selectionBox) {
     if (!canvas || !ctx) return;
     const { entities } = state;
     const ox = getRenderOffset().x;
     const oy = getRenderOffset().y;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (selectionBox && selectionBox.start && selectionBox.current) {
+        const x = Math.min(selectionBox.start.x, selectionBox.current.x);
+        const y = Math.min(selectionBox.start.y, selectionBox.current.y);
+        const w = Math.abs(selectionBox.current.x - selectionBox.start.x);
+        const h = Math.abs(selectionBox.current.y - selectionBox.start.y);
+        ctx.strokeStyle = 'rgba(88, 166, 255, 0.9)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(x, y, w, h);
+        ctx.fillStyle = 'rgba(88, 166, 255, 0.1)';
+        ctx.fillRect(x, y, w, h);
+        ctx.setLineDash([]);
+    }
 
     for (let row = 0; row < CONFIG.MAP_ROWS; row++) {
         for (let col = 0; col < CONFIG.MAP_COLS; col++) {
