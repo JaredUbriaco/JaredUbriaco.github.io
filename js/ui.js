@@ -179,18 +179,41 @@ function initUI(game) {
 
     canvas.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        if (!gameInstance) return;
+        if (!gameInstance || selectedEntities.length === 0) return;
         const pos = getCanvasCoords(e);
+        const clickedEntity = gameInstance.getEntityAtScreen(pos.x, pos.y);
         const offset = getRenderOffset();
         const { gridX, gridY } = screenToWorld(pos.x - offset.x, pos.y - offset.y, 0, 0);
 
         const movableUnits = selectedEntities.filter(u =>
             u.type === ENTITY_TYPES.SCV || u.type === ENTITY_TYPES.MARINE);
-        movableUnits.forEach(u => {
-            u.targetX = gridX;
-            u.targetY = gridY;
-            u.state = 'moving';
-        });
+
+        if (clickedEntity && clickedEntity.type === ENTITY_TYPES.MINERAL_PATCH &&
+            clickedEntity.minerals >= (UNITS[ENTITY_TYPES.SCV].mineralsPerTrip || 5)) {
+            movableUnits.filter(u => u.type === ENTITY_TYPES.SCV).forEach(u => {
+                if (u.state === 'mining' && u.targetId) {
+                    const patch = gameInstance.state.entities.find(e => e.id === u.targetId);
+                    if (patch) patch.minerals += UNITS[ENTITY_TYPES.SCV].mineralsPerTrip || 5;
+                }
+                u.targetId = clickedEntity.id;
+                u.targetX = null;
+                u.targetY = null;
+                u.miningProgress = 0;
+                u.state = 'moving_to_mineral';
+            });
+            movableUnits.filter(u => u.type === ENTITY_TYPES.MARINE).forEach(u => {
+                u.targetX = gridX;
+                u.targetY = gridY;
+                u.state = 'moving';
+            });
+        } else {
+            movableUnits.forEach(u => {
+                u.targetId = null;
+                u.targetX = gridX;
+                u.targetY = gridY;
+                u.state = 'moving';
+            });
+        }
     });
 
     btnPause.addEventListener('click', () => {

@@ -111,6 +111,23 @@ function updateSCV(scv, entities, map, deltaTime) {
         return;
     }
 
+    if (scv.state === 'moving' && scv.targetX !== null && scv.targetY !== null) {
+        const dx = scv.targetX - scv.gridX;
+        const dy = scv.targetY - scv.gridY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.35) {
+            scv.gridX = scv.targetX;
+            scv.gridY = scv.targetY;
+            scv.targetX = null;
+            scv.targetY = null;
+            scv.state = 'idle';
+            return;
+        }
+        scv.gridX += (dx / dist) * speed;
+        scv.gridY += (dy / dist) * speed;
+        return;
+    }
+
     if (scv.state === 'moving_to_mineral') {
         const patch = entities.find(e => e.id === scv.targetId);
         if (!patch || patch.minerals < def.mineralsPerTrip) {
@@ -133,7 +150,7 @@ function updateSCV(scv, entities, map, deltaTime) {
         return;
     }
 
-    if (scv.state === 'idle' || scv.state === 'moving') {
+    if (scv.state === 'idle') {
         const patch = findNearest(scv, entities, ENTITY_TYPES.MINERAL_PATCH);
         if (patch) {
             scv.targetId = patch.id;
