@@ -8,6 +8,10 @@ let gameInstance = null;
 function initUI(game) {
     gameInstance = game;
     const canvas = document.getElementById('game-canvas');
+    let isDragging = false;
+    let didDrag = false;
+    let lastMouseX = 0;
+    let lastMouseY = 0;
     const panel = document.getElementById('selection-panel');
     const info = document.getElementById('selection-info');
     const buildMenu = document.getElementById('build-menu');
@@ -58,16 +62,48 @@ function initUI(game) {
         }
     }
 
+    canvas.addEventListener('mousedown', (e) => {
+        if (e.button === 0) {
+            isDragging = true;
+            didDrag = false;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        if (isDragging && e.buttons === 1) {
+            const dx = e.clientX - lastMouseX;
+            const dy = e.clientY - lastMouseY;
+            if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDrag = true;
+            camera.x += dx;
+            camera.y += dy;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+        if (e.button === 0) isDragging = false;
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        isDragging = false;
+    });
+
     canvas.addEventListener('click', (e) => {
+        if (didDrag) {
+            didDrag = false;
+            return;
+        }
         if (!gameInstance) return;
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
         const cx = (e.clientX - rect.left) * scaleX;
         const cy = (e.clientY - rect.top) * scaleY;
-        const ox = getRenderOffset().x;
-        const oy = getRenderOffset().y;
-        const { gridX, gridY } = screenToWorld(cx - ox, cy - oy, 0, 0);
+        const offset = getRenderOffset();
+        const { gridX, gridY } = screenToWorld(cx - offset.x, cy - offset.y, 0, 0);
 
         if (e.button === 2) {
             if (selectedEntity && (selectedEntity.type === ENTITY_TYPES.SCV || selectedEntity.type === ENTITY_TYPES.MARINE)) {
@@ -97,16 +133,5 @@ function initUI(game) {
         updateSelectionPanel,
         setStatus: (text) => { statusText.textContent = text; },
         showWin: () => { winOverlay.classList.remove('hidden'); },
-    };
-}
-
-function getRenderOffset() {
-    const canvas = document.getElementById('game-canvas');
-    if (!canvas) return { x: 0, y: 0 };
-    const mapPixelW = (CONFIG.MAP_COLS + CONFIG.MAP_ROWS) * (CONFIG.TILE_WIDTH / 2);
-    const mapPixelH = (CONFIG.MAP_COLS + CONFIG.MAP_ROWS) * (CONFIG.TILE_HEIGHT / 2);
-    return {
-        x: (canvas.width - mapPixelW) / 2,
-        y: 40,
     };
 }

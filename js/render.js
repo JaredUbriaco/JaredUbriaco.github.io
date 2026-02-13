@@ -18,8 +18,11 @@ const COLORS = {
 };
 
 let canvas, ctx;
-let cameraOffsetX = 0;
-let cameraOffsetY = 0;
+
+const camera = window.camera = {
+    x: 0,
+    y: 0,
+};
 
 function initRender(c) {
     canvas = c;
@@ -27,11 +30,10 @@ function initRender(c) {
 }
 
 function getRenderOffset() {
-    const mapPixelW = (CONFIG.MAP_COLS + CONFIG.MAP_ROWS) * (CONFIG.TILE_WIDTH / 2);
-    const mapPixelH = (CONFIG.MAP_COLS + CONFIG.MAP_ROWS) * (CONFIG.TILE_HEIGHT / 2);
+    const baseScreen = worldToScreen(CONFIG.MAP_COLS / 2 - 0.5, CONFIG.MAP_ROWS / 2 - 0.5);
     return {
-        x: (canvas.width - mapPixelW) / 2 + cameraOffsetX,
-        y: 40 + cameraOffsetY,
+        x: (canvas.width / 2) + camera.x - baseScreen.x,
+        y: (canvas.height / 2) + camera.y - baseScreen.y,
     };
 }
 
