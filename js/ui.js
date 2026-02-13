@@ -7,6 +7,7 @@ let gameInstance = null;
 let boxSelectStart = null;
 let boxSelectCurrent = null;
 let lastWasBoxSelect = false;
+let lastWasPan = false;
 let isPanning = false;
 let panStartX = 0;
 let panStartY = 0;
@@ -123,6 +124,7 @@ function initUI(game) {
 
     canvas.addEventListener('mouseup', (e) => {
         if (e.button === 1 || isPanning) {
+            if (isPanning) lastWasPan = true;
             isPanning = false;
             if (e.button === 1) return;
         }
@@ -154,8 +156,9 @@ function initUI(game) {
 
     canvas.addEventListener('click', (e) => {
         if (!gameInstance || e.button !== 0) return;
-        if (lastWasBoxSelect) {
+        if (lastWasBoxSelect || lastWasPan) {
             lastWasBoxSelect = false;
+            lastWasPan = false;
             return;
         }
         const pos = getCanvasCoords(e);
