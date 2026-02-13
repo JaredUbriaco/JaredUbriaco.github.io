@@ -8,8 +8,8 @@
     let lastTime = 0;
     let accumulated = 0;
     let paused = false;
-    let speedIndex = 0;
-    const SPEEDS = [1, 2, 4];
+    let speedIndex = 1;
+    const SPEEDS = [0.5, 1, 2];
     let ui = null;
     let aiCooldown = 0;
 
@@ -152,7 +152,7 @@
         cycleSpeed,
     });
 
-    if (ui) ui.setStatus('Colony operational. Drag to select • Right-click to move • Alt+drag or middle-mouse to pan');
+    if (ui) ui.setStatus('Colony operational. Drag to select • Right-click to move • Alt+drag to pan • Slower = more relaxing');
 
     requestAnimationFrame(tick);
 

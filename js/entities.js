@@ -82,11 +82,11 @@ function createInitialState() {
     const scv = createEntity(ENTITY_TYPES.SCV, ccX + 1, ccY + 1);
     entities.push(scv);
 
-    // Spawn mineral patches around the base
+    // Spawn mineral patches farther from base - relaxed fish-tank distances
     const mineralPositions = [
-        [ccX - 2, ccY - 1], [ccX - 1, ccY - 2], [ccX, ccY - 2],
-        [ccX + 2, ccY], [ccX + 2, ccY + 1], [ccX + 1, ccY + 2],
-        [ccX - 2, ccY + 1], [ccX + 3, ccY - 1],
+        [ccX - 6, ccY - 5], [ccX - 5, ccY - 6], [ccX - 4, ccY - 7],
+        [ccX + 6, ccY - 4], [ccX + 7, ccY - 3], [ccX + 5, ccY - 5],
+        [ccX - 6, ccY + 4], [ccX + 6, ccY + 3],
     ];
     mineralPositions.forEach(([x, y]) => {
         if (x >= 0 && x < CONFIG.MAP_COLS && y >= 0 && y < CONFIG.MAP_ROWS) {

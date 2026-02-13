@@ -70,8 +70,8 @@ const UNITS = {
         buildTime: 12,
         supplyCost: 1,
         mineralsPerTrip: 5,
-        miningTimeSeconds: 2,
-        moveSpeed: 12,
+        miningTimeSeconds: 8,
+        moveSpeed: 1.8,
     },
     [ENTITY_TYPES.MARINE]: {
         name: 'Marine',
