@@ -78,15 +78,15 @@ function createInitialState() {
     const cc = createEntity(ENTITY_TYPES.COMMAND_CENTER, ccX, ccY);
     entities.push(cc);
 
-    // Spawn 1 SCV
-    const scv = createEntity(ENTITY_TYPES.SCV, ccX + 1, ccY + 1);
+    // Spawn 1 SCV outside the base (CC is 3x2, so spawn to the right)
+    const scv = createEntity(ENTITY_TYPES.SCV, ccX + 4, ccY);
     entities.push(scv);
 
-    // Spawn mineral patches farther from base - relaxed fish-tank distances
+    // Mineral patches well clear of base - no overlap with CC footprint (ccX to ccX+2, ccY to ccY+1)
     const mineralPositions = [
-        [ccX - 6, ccY - 5], [ccX - 5, ccY - 6], [ccX - 4, ccY - 7],
-        [ccX + 6, ccY - 4], [ccX + 7, ccY - 3], [ccX + 5, ccY - 5],
-        [ccX - 6, ccY + 4], [ccX + 6, ccY + 3],
+        [ccX - 7, ccY - 6], [ccX - 6, ccY - 7], [ccX - 5, ccY - 8],
+        [ccX + 7, ccY - 5], [ccX + 8, ccY - 4], [ccX + 6, ccY - 6],
+        [ccX - 7, ccY + 5], [ccX + 7, ccY + 4],
     ];
     mineralPositions.forEach(([x, y]) => {
         if (x >= 0 && x < CONFIG.MAP_COLS && y >= 0 && y < CONFIG.MAP_ROWS) {

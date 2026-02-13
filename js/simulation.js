@@ -176,7 +176,9 @@ function updateBuilding(building, entities, map, deltaTime) {
     queued.progress = (queued.progress || 0) + (100 / queued.buildTime) * (deltaTime / 1000);
     if (queued.progress >= 100) {
         building.buildQueue.shift();
-        const unit = createEntity(queued.type, building.gridX + 1, building.gridY + building.height);
+        const spawnX = building.gridX + building.width;
+        const spawnY = building.gridY + Math.floor(building.height / 2);
+        const unit = createEntity(queued.type, spawnX, spawnY);
         entities.push(unit);
         map.supply += queued.supplyCost || 0;
     }
