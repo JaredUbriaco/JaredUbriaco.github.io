@@ -1,0 +1,313 @@
+/**
+ * mood.css — MOOD Game Styles
+ * 
+ * Layout, overlays, hue-rotate filter, HUD positioning.
+ * Sci-fi vaporwave aesthetic: dark backgrounds, neon accents, monospace text.
+ */
+
+/* ── CSS Custom Properties ───────────────────────────────────────── */
+:root {
+    --hud-text: #e0e0e0;
+    --hud-accent: #00e5ff;
+    --hud-bg: rgba(0, 0, 0, 0.5);
+    --hud-font: 'Courier New', Courier, monospace;
+    --overlay-bg: rgba(0, 0, 0, 0.85);
+    --neon-pink: #ff00ff;
+    --neon-cyan: #00ffff;
+    --neon-purple: #9b59b6;
+}
+
+/* ── Body & Page Reset ───────────────────────────────────────────── */
+body {
+    margin: 0;
+    padding: 0;
+    background: #000;
+    overflow: hidden;
+    font-family: var(--hud-font);
+    color: var(--hud-text);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+/* ── Game Wrapper ────────────────────────────────────────────────── */
+#mood-wrapper {
+    position: relative;
+    width: 800px;
+    height: 600px;
+    margin: 0 auto;
+    overflow: hidden;
+    filter: hue-rotate(0deg);
+    /* GPU-accelerated — effectively free */
+}
+
+/* ── Main Canvas ─────────────────────────────────────────────────── */
+#mood-canvas {
+    width: 800px;
+    height: 600px;
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: #000;
+}
+
+/* ── HUD Overlay (over canvas) ───────────────────────────────────── */
+#hud-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* ── HUD Elements ────────────────────────────────────────────────── */
+#hud-kill-counter {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    font-size: 14px;
+    color: var(--hud-accent);
+    text-shadow: 0 0 6px rgba(0, 229, 255, 0.5);
+    letter-spacing: 1px;
+}
+
+#hud-room-label {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 16px;
+    color: var(--hud-text);
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    opacity: 0;
+    transition: opacity 0.3s ease-in, opacity 0.5s ease-out;
+}
+
+#hud-room-label.visible {
+    opacity: 1;
+}
+
+#hud-weapon {
+    position: absolute;
+    bottom: 16px;
+    right: 20px;
+    font-size: 13px;
+    color: var(--hud-accent);
+    text-shadow: 0 0 6px rgba(0, 229, 255, 0.3);
+    letter-spacing: 1px;
+}
+
+#hud-ai-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, 20px);
+    font-size: 14px;
+    color: var(--neon-cyan);
+    letter-spacing: 3px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+#hud-ai-indicator.active {
+    animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+#hud-crosshair {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4px;
+    height: 4px;
+    transform: translate(-50%, -50%);
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+}
+
+/* ── Minimap ─────────────────────────────────────────────────────── */
+#hud-minimap-container {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 120px;
+    height: 120px;
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    background: rgba(0, 0, 0, 0.6);
+}
+
+#minimap-canvas {
+    width: 120px;
+    height: 120px;
+    display: block;
+    image-rendering: pixelated;
+}
+
+/* ── Third Eye ───────────────────────────────────────────────────── */
+#hud-third-eye-container {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 80px;
+}
+
+#third-eye-canvas {
+    width: 80px;
+    height: 80px;
+    display: block;
+}
+
+/* ── HUD Messages ────────────────────────────────────────────────── */
+#hud-messages {
+    position: absolute;
+    top: 45%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    font-size: 18px;
+    color: var(--neon-cyan);
+    text-shadow: 0 0 12px rgba(0, 255, 255, 0.6);
+    letter-spacing: 2px;
+    pointer-events: none;
+}
+
+#hud-messages .message {
+    opacity: 1;
+    transition: opacity 0.5s ease-out;
+    margin-bottom: 4px;
+}
+
+#hud-messages .message.fading {
+    opacity: 0;
+}
+
+/* ── Overlays ────────────────────────────────────────────────────── */
+.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 20;
+    pointer-events: auto;
+}
+
+.overlay.hidden {
+    display: none;
+}
+
+/* ── Start Overlay ───────────────────────────────────────────────── */
+#overlay-start {
+    background: var(--overlay-bg);
+    cursor: pointer;
+    font-size: 28px;
+    color: var(--neon-cyan);
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    text-shadow: 0 0 20px rgba(0, 255, 255, 0.6);
+    animation: pulse-text 2s ease-in-out infinite;
+    user-select: none;
+}
+
+/* ── Pause Overlay ───────────────────────────────────────────────── */
+#overlay-pause {
+    background: var(--overlay-bg);
+}
+
+#overlay-pause h2 {
+    font-size: 32px;
+    color: var(--hud-text);
+    letter-spacing: 8px;
+    margin-bottom: 32px;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+}
+
+#overlay-pause button {
+    display: block;
+    width: 200px;
+    padding: 12px 0;
+    margin: 8px 0;
+    background: transparent;
+    border: 1px solid var(--hud-accent);
+    color: var(--hud-accent);
+    font-family: var(--hud-font);
+    font-size: 16px;
+    letter-spacing: 3px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+#overlay-pause button:hover {
+    background: var(--hud-accent);
+    color: #000;
+}
+
+/* ── Controls Overlay ────────────────────────────────────────────── */
+#overlay-controls {
+    background: rgba(0, 0, 0, 0.7);
+    font-size: 14px;
+    color: var(--hud-text);
+    letter-spacing: 1px;
+    line-height: 2;
+    opacity: 1;
+    transition: opacity 0.5s ease-out;
+    pointer-events: none;
+    z-index: 15;
+}
+
+#overlay-controls.fade-out {
+    opacity: 0;
+}
+
+#overlay-controls .key {
+    display: inline-block;
+    padding: 2px 8px;
+    margin: 0 4px;
+    border: 1px solid var(--hud-accent);
+    border-radius: 3px;
+    color: var(--hud-accent);
+    font-size: 12px;
+}
+
+/* ── Debug Overlay ───────────────────────────────────────────────── */
+#debug-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.8);
+    color: #0f0;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre;
+    z-index: 30;
+    pointer-events: none;
+    display: none;
+}
+
+#debug-overlay.visible {
+    display: block;
+}
+
+/* ── Animations ──────────────────────────────────────────────────── */
+@keyframes pulse-text {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+}
+
+@keyframes pulse-glow {
+    0%, 100% { opacity: 0.4; text-shadow: 0 0 6px rgba(0, 255, 255, 0.3); }
+    50% { opacity: 1; text-shadow: 0 0 16px rgba(0, 255, 255, 0.8); }
+}

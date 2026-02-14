@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOOD</title>
+    <link rel="stylesheet" href="css/mood.css">
+</head>
+<body>
+    <div id="mood-wrapper">
+        <!-- Main game canvas (400x300 internal, 800x600 display) -->
+        <canvas id="mood-canvas"></canvas>
+
+        <!-- HUD Overlay (absolute over canvas, pointer-events: none) -->
+        <div id="hud-overlay">
+            <div id="hud-kill-counter">0/23 SPIRITS</div>
+            <div id="hud-room-label"></div>
+            <div id="hud-weapon">FIST</div>
+            <div id="hud-ai-indicator"></div>
+            <div id="hud-crosshair"></div>
+            <div id="hud-minimap-container">
+                <canvas id="minimap-canvas" width="120" height="120"></canvas>
+            </div>
+            <div id="hud-third-eye-container">
+                <canvas id="third-eye-canvas" width="80" height="80"></canvas>
+            </div>
+            <div id="hud-messages"></div>
+        </div>
+
+        <!-- Start Overlay -->
+        <div id="overlay-start" class="overlay">CLICK TO BEGIN</div>
+
+        <!-- Pause Overlay -->
+        <div id="overlay-pause" class="overlay hidden">
+            <h2>PAUSED</h2>
+            <button id="btn-resume">RESUME</button>
+            <button id="btn-quit">QUIT</button>
+        </div>
+
+        <!-- Controls Overlay (fades after 3s) -->
+        <div id="overlay-controls" class="overlay hidden">
+            <div>
+                <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> Move &nbsp;&nbsp;
+                <span class="key">Mouse</span> Look<br>
+                <span class="key">LMB</span> Fire &nbsp;&nbsp;
+                <span class="key">E</span> Interact<br>
+                <span class="key">1</span><span class="key">2</span><span class="key">3</span> Weapons &nbsp;&nbsp;
+                <span class="key">ESC</span> Pause
+            </div>
+        </div>
+
+        <!-- Debug Overlay (toggle with backtick) -->
+        <div id="debug-overlay"></div>
+    </div>
+
+    <!-- Game Entry Point (ES Module) -->
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
