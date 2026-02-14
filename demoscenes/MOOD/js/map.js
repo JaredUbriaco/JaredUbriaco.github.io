@@ -164,6 +164,8 @@ fillRect(A2R2_X, A2R2_Y, A2R2_W, A2R2_H, TILE.EMPTY);
 tagRoom(A2R2_X, A2R2_Y, A2R2_W, A2R2_H, 'a2r2');
 // L-shape cutout (block upper-right corner to make L shape)
 fillRect(A2R2_X + 5, A2R2_Y, 3, 5, TILE.WALL);
+// Carve opening through L-shape so hallway r1→r2 connects to a2r2 interior
+fillRect(A2R2_X + 5, HALL_R1R2_Y, 3, HALL_R1R2_H, TILE.EMPTY);
 // Internal walls
 fillRect(A2R2_X + 3, A2R2_Y + 6, 2, 2, TILE.WALL);
 
