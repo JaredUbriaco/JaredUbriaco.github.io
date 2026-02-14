@@ -534,7 +534,7 @@ function findNearbyClosedDoorForAI(state) {
         const dx = door.x + 0.5 - px;
         const dy = door.y + 0.5 - py;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > INTERACTION_RANGE + 0.5) continue;
+        if (dist > INTERACTION_RANGE + 1.5) continue;
         if (dist < bestDist) {
             bestDist = dist;
             best = { door, key, dist };
@@ -966,8 +966,8 @@ function chooseRequestedState(sensed) {
     if (aiStuckTimer > 1.5) return AI_STATE.RECOVER;
     if (sensed.doorIntent) return AI_STATE.INTERACT;
     if (sensed.objectiveId) return AI_STATE.OBJECTIVE;
-    if (sensed.enemyInfo) return AI_STATE.COMBAT;
     if (sensed.nearbyDoor && sensed.forwardBlocked) return AI_STATE.INTERACT;
+    if (sensed.enemyInfo) return AI_STATE.COMBAT;
     return AI_STATE.EXPLORE;
 }
 
@@ -1046,11 +1046,10 @@ function plan(state, sensed, context, ai) {
                 return;
             }
             const roomEnemy = findNearestEnemyInRoom(state, 'area1');
-            if (roomEnemy) {
+            if (roomEnemy && hasLineOfSight(player.x, player.y, roomEnemy.entity.x, roomEnemy.entity.y)) {
                 steerTowardPoint(ai, player, roomEnemy.entity.x, roomEnemy.entity.y, dt, 'obj:clear-area1');
                 return;
             }
-            return;
         }
 
         const button = INTERACTABLE_POSITIONS.area1Button;
@@ -1230,10 +1229,14 @@ function plan(state, sensed, context, ai) {
         return;
     }
 
+    // Only chase enemies we can actually see — avoid running at walls toward invisible targets
     const localEnemy = sensed.localEnemy;
     if (aiState === AI_STATE.EXPLORE && localEnemy && localEnemy.distance < 14) {
-        steerTowardPoint(ai, player, localEnemy.entity.x, localEnemy.entity.y, dt, `explore:local-enemy:${localEnemy.entity.type}`);
-        return;
+        const canSee = hasLineOfSight(player.x, player.y, localEnemy.entity.x, localEnemy.entity.y);
+        if (canSee) {
+            steerTowardPoint(ai, player, localEnemy.entity.x, localEnemy.entity.y, dt, `explore:local-enemy:${localEnemy.entity.type}`);
+            return;
+        }
     }
 
     if (aiState === AI_STATE.EXPLORE && aiInteractCooldown <= 0) {
