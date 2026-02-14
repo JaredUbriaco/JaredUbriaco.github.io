@@ -1,15 +1,19 @@
 /**
  * ai.js — AI Autopilot System
- * 
- * Takes control when the player is idle (no input for ~10s).
- * Navigates the map, engages enemies, opens doors, collects pickups.
- * Uses synthetic input that feeds into the same player.update() path.
- * 
- * Strategy:
- * 1. If enemies are visible, face and attack them.
- * 2. If pickups are nearby, walk toward them.
- * 3. If a door is nearby and facing, interact (E).
- * 4. Otherwise, wander toward unexplored rooms via waypoints.
+ *
+ * Takes control when the player is idle (~5s). Navigates, fights, opens doors,
+ * collects pickups. Feeds synthetic input into player.update().
+ *
+ * Sections (for navigation):
+ * - Waypoint graph + BFS room pathfinding
+ * - AI state + action queue
+ * - Utility (angleTo, distanceTo, hasLineOfSight, isPathBlocked)
+ * - Combat (target scoring, weapon policy, positioning, projectile dodge)
+ * - Doors (findNearbyClosedDoorForAI, door intent)
+ * - Tile A* pathfinding (buildAStarPath, followTilePath, validatePathAhead)
+ * - Steering (steerTowardPoint, avoidance, navigateToRoom, moveAlongWaypointPath)
+ * - State machine (sense, chooseRequestedState, transitionState, plan, act)
+ * - Main update (export update)
  */
 
 import {
@@ -18,6 +22,7 @@ import {
 } from './map.js';
 import { TILE, INTERACTION_RANGE, PLAYER_SPEED } from './config.js';
 import { getObjectiveHintsForAI, getCurrentObjectiveTask, getOrderedUnmetTasks, recordTaskFailure, getTaskFailure } from './objectives.js';
+import { angleTo, distanceTo, normalizeAngle } from './utils.js';
 
 // ── Waypoint Graph (room centers) ───────────────────────────────────
 // Each node is a room center; edges are direct connections via hallways.
@@ -151,7 +156,8 @@ let aiRouteProgress = {
     degradedTimer: 0,
 };
 const AI_ASSIST_HINT_COOLDOWN = AI_TUNING.assistHintCooldown;
-let aiLastAssistHintAt = -999;
+let aiLastAssistHintAt = -999; // seconds (state.time.elapsed) when we last showed the stuck hint
+let aiRecoveryGraceUntil = 0; // don't count as stuck for this many seconds after leaving RECOVER
 let aiReplanCount = 0;
 
 function resetAiOutput(out) {
@@ -255,24 +261,7 @@ function createActionQueue(output) {
     });
 }
 
-// ── Utility Functions ───────────────────────────────────────────────
-
-function angleTo(fromX, fromY, toX, toY) {
-    return Math.atan2(toY - fromY, toX - fromX);
-}
-
-function distanceTo(fromX, fromY, toX, toY) {
-    const dx = toX - fromX;
-    const dy = toY - fromY;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-
-/** Normalize angle to [-PI, PI] */
-function normalizeAngle(angle) {
-    while (angle > Math.PI) angle -= Math.PI * 2;
-    while (angle < -Math.PI) angle += Math.PI * 2;
-    return angle;
-}
+// ── Utility (angleTo, distanceTo, normalizeAngle from utils.js) ───────
 
 /**
  * Simple line-of-sight check: step along the ray from (x1,y1) to (x2,y2).
@@ -1334,43 +1323,48 @@ export function update(state) {
     const currentRoom = getRoomId(player.x, player.y);
     if (currentRoom) aiVisitedRooms.add(currentRoom);
 
-    // Stuck detection — more aggressive (1.5s threshold, smarter recovery)
+    // Stuck detection — grace period after recovery so we don't thrash in/out of RECOVER
     const distMoved = distanceTo(player.x, player.y, aiLastPos.x, aiLastPos.y);
-    if (distMoved < 0.02) {
+    const inGrace = state.time && state.time.elapsed < aiRecoveryGraceUntil;
+    if (distMoved < 0.02 && !inGrace) {
         aiStuckTimer += dt;
     } else {
-        aiStuckTimer = Math.max(0, aiStuckTimer - dt * 2); // decay faster when moving
+        aiStuckTimer = Math.max(0, aiStuckTimer - dt * 2);
     }
     aiLastPos.x = player.x;
     aiLastPos.y = player.y;
 
-    // Optional player-facing assist hint when autopilot is stuck (rate-limited)
+    // Optional player-facing assist hint when autopilot is stuck (rate-limited; cooldown in seconds)
+    const elapsedSec = state.time && typeof state.time.elapsed === 'number' ? state.time.elapsed : 0;
     const stuckOrRecovering = aiStuckTimer > 2.5 || aiState === AI_STATE.RECOVER;
-    if (stuckOrRecovering && state.hud && state.time && (state.time.now - aiLastAssistHintAt) >= AI_ASSIST_HINT_COOLDOWN) {
-        state.hud.messages.push({ text: 'AUTOPILOT STUCK — Try moving or open the door manually.', timer: 4 });
-        aiLastAssistHintAt = state.time.now;
+    if (stuckOrRecovering && state.hud && (elapsedSec - aiLastAssistHintAt) >= AI_ASSIST_HINT_COOLDOWN) {
+        const msg = 'AUTOPILOT STUCK — Try moving or open the door manually.';
+        const last = state.hud.messages[state.hud.messages.length - 1];
+        if (!last || last.text !== msg) {
+            state.hud.messages.push({ text: msg, timer: 4 });
+            if (state.hud.messages.length > 8) state.hud.messages.splice(0, state.hud.messages.length - 8);
+        }
+        aiLastAssistHintAt = elapsedSec;
     }
 
-    // If in recovery state, do a smart unstuck maneuver.
+    // If in recovery state, do one frame of unstuck maneuver then leave RECOVER so we don't spin forever.
     if (aiState === AI_STATE.RECOVER) {
-        // Turn away from whatever we're stuck on, then strafe
         const forwardBlocked = isPathBlocked(player.x, player.y, player.angle, 1.0);
         const leftBlocked = isPathBlocked(player.x, player.y, player.angle - Math.PI / 2, 1.0);
         const rightBlocked = isPathBlocked(player.x, player.y, player.angle + Math.PI / 2, 1.0);
 
         if (forwardBlocked && !rightBlocked) {
-            ai.lookDX = 3; // turn right
+            ai.lookDX = 3;
             ai.strafeRight = true;
         } else if (forwardBlocked && !leftBlocked) {
-            ai.lookDX = -3; // turn left
+            ai.lookDX = -3;
             ai.strafeLeft = true;
         } else {
-            // Both sides blocked — turn around
             ai.lookDX = 6;
             ai.moveBack = true;
         }
         aiStuckTimer = 0;
-        // Clear current path to force re-pathfinding
+        aiRecoveryGraceUntil = (state.time && state.time.elapsed) ? state.time.elapsed + 0.5 : 0;
         aiPath = [];
         aiPathIndex = 0;
         clearDoorIntent();
@@ -1378,6 +1372,7 @@ export function update(state) {
         resetTilePath();
         aiAvoidance.mode = null;
         aiAvoidance.timer = 0;
+        aiState = AI_STATE.EXPLORE;
         return;
     }
 

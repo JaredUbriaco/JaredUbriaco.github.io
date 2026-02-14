@@ -9,6 +9,7 @@
 import { WEAPONS, TILE } from './config.js';
 import { isSolid, getTile } from './map.js';
 import { aggroEntity } from './entities.js';
+import { normalizeAngle } from './utils.js';
 
 // ── Ray-Circle Intersection ─────────────────────────────────────────
 
@@ -185,9 +186,7 @@ function resolveMelee(state, weapon) {
 
         // Check facing angle
         const angleToEntity = Math.atan2(dy, dx);
-        let angleDiff = angleToEntity - player.angle;
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        const angleDiff = normalizeAngle(angleToEntity - player.angle);
 
         if (Math.abs(angleDiff) < Math.PI / 6) { // ±30°
             damageEntity(entity, weapon.damage, state);

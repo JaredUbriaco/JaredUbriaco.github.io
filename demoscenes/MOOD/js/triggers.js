@@ -12,6 +12,7 @@ import {
 
 import { getTile, isSolid, doors, grid, INTERACTABLE_POSITIONS } from './map.js';
 import { consumeInteract } from './input.js';
+import { normalizeAngle } from './utils.js';
 
 let noInteractHintCooldown = 0;
 
@@ -22,14 +23,7 @@ function pushMessage(state, text, duration) {
     state.hud.messages.push({ text, timer: duration });
 }
 
-// ── Angle Utilities ─────────────────────────────────────────────────
-
-/** Normalize angle to [-PI, PI] */
-function normalizeAngle(angle) {
-    while (angle > Math.PI) angle -= Math.PI * 2;
-    while (angle < -Math.PI) angle += Math.PI * 2;
-    return angle;
-}
+// ── Angle / range (normalizeAngle from utils.js) ──────────────────────
 
 /**
  * Check if a target position is within interaction range and facing angle.

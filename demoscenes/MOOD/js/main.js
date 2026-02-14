@@ -191,26 +191,26 @@ function updateHudDom() {
 
 // ── Message System ──────────────────────────────────────────────────
 const hudMessages = document.getElementById('hud-messages');
+const HUD_MESSAGES_MAX = 8;
 
 function updateMessages(dt) {
     const msgs = state.hud.messages;
-    // Tick down timers, remove expired
     for (let i = msgs.length - 1; i >= 0; i--) {
         msgs[i].timer -= dt;
-        if (msgs[i].timer <= 0) {
-            msgs.splice(i, 1);
-        }
+        if (msgs[i].timer <= 0) msgs.splice(i, 1);
     }
-    // Render active messages
+    if (msgs.length > HUD_MESSAGES_MAX) msgs.splice(0, msgs.length - HUD_MESSAGES_MAX);
     hudMessages.innerHTML = msgs.map(m => {
-        const opacity = Math.min(1, m.timer / 0.5); // fade out in last 0.5s
+        const opacity = Math.min(1, m.timer / 0.5);
         return `<div class="message" style="opacity:${opacity}">${m.text}</div>`;
     }).join('');
 }
 
-/** Push a timed HUD message. */
+/** Push a timed HUD message. Capped so the list never overflows. */
 export function showMessage(text, duration = 2) {
-    state.hud.messages.push({ text, timer: duration });
+    const msgs = state.hud.messages;
+    msgs.push({ text, timer: duration });
+    if (msgs.length > HUD_MESSAGES_MAX) msgs.splice(0, msgs.length - HUD_MESSAGES_MAX);
 }
 
 // ── Room Label ──────────────────────────────────────────────────────
