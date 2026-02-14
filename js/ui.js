@@ -74,14 +74,14 @@ function initUI(game) {
                     const unitDef = UNITS[unitType];
                     if (!unitDef) return;
                     const cost = unitDef.cost;
-                    const canAfford = gameInstance && canAfford(gameInstance.state.map, cost);
+                    const affordable = gameInstance && canAfford(gameInstance.state.map, cost);
                     const hasSupply = gameInstance && hasSupplySpace(gameInstance.state.map, unitDef.supplyCost || 0);
                     const btn = document.createElement('button');
                     btn.className = 'build-btn';
                     btn.textContent = `${unitDef.name} (${cost.minerals}M)`;
-                    btn.disabled = !canAfford || !hasSupply;
+                    btn.disabled = !affordable || !hasSupply;
                     btn.onclick = () => {
-                        if (gameInstance && canAfford && hasSupply) {
+                        if (gameInstance && canAfford(gameInstance.state.map, cost) && hasSupplySpace(gameInstance.state.map, unitDef.supplyCost || 0)) {
                             gameInstance.buildUnit(buildings[0], unitType);
                             updateSelectionPanel();
                         }
