@@ -175,7 +175,7 @@
         cycleSpeed,
     });
 
-    if (ui) ui.setStatus('Scroll to zoom • Drag to select • Right-click to move • Alt+drag to pan • Red = enemy colony');
+    if (ui) ui.setStatus('Eliminate the enemy. Marines auto-attack and advance. Right-click to move.');
 
     requestAnimationFrame(tick);
 

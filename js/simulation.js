@@ -218,6 +218,26 @@ function findEnemyInRange(marine, entities, range) {
     return nearest;
 }
 
+function findNearestEnemy(marine, entities, maxRange) {
+    const myFaction = marine.faction || 'player';
+    let nearest = null;
+    let nearestDist = Infinity;
+    for (const e of entities) {
+        if (e === marine || !e.health || e.health <= 0) continue;
+        const isEnemy = (e.faction || 'player') !== myFaction;
+        if (!isEnemy) continue;
+        if (e.type === ENTITY_TYPES.MINERAL_PATCH || e.type === ENTITY_TYPES.VESPENE_GEYSER) continue;
+        const cx = e.gridX + (e.width || 0) / 2;
+        const cy = e.gridY + (e.height || 0) / 2;
+        const d = distance(marine.gridX, marine.gridY, cx, cy);
+        if (d < nearestDist && d <= maxRange) {
+            nearestDist = d;
+            nearest = e;
+        }
+    }
+    return nearest;
+}
+
 function applyDamage(target, rawDamage, armor) {
     const dmg = Math.max(1, rawDamage - (armor || 0));
     target.health = (target.health || target.maxHealth) - dmg;
@@ -228,6 +248,7 @@ function updateMarine(marine, entities, deltaTime) {
     const def = UNITS[ENTITY_TYPES.MARINE];
     const dtSec = deltaTime / 1000;
     const range = def.attackRange || 5;
+    const sightRange = def.sightRange || 9;
 
     marine.attackCooldown = Math.max(0, (marine.attackCooldown || 0) - dtSec);
 
@@ -235,6 +256,8 @@ function updateMarine(marine, entities, deltaTime) {
     if (enemy) {
         marine.targetId = enemy.id;
         marine.state = 'attacking';
+        marine.targetX = null;
+        marine.targetY = null;
         if (marine.attackCooldown <= 0) {
             const dead = applyDamage(enemy, def.damage || 6, enemy.armor);
             marine.attackCooldown = def.attackCooldown || 0.61;
@@ -243,9 +266,8 @@ function updateMarine(marine, entities, deltaTime) {
         return;
     }
     marine.targetId = null;
-    marine.state = marine.targetX !== null ? 'moving' : 'idle';
 
-    if (marine.state === 'moving' && marine.targetX !== null) {
+    if (marine.targetX !== null && marine.targetY !== null) {
         const speed = marine.moveSpeed * dtSec;
         const dx = marine.targetX - marine.gridX;
         const dy = marine.targetY - marine.gridY;
@@ -260,6 +282,13 @@ function updateMarine(marine, entities, deltaTime) {
             marine.gridX += (dx / dist) * speed;
             marine.gridY += (dy / dist) * speed;
         }
+        return;
+    }
+
+    const nearEnemy = findNearestEnemy(marine, entities, sightRange);
+    if (nearEnemy && !marine.targetX) {
+        marine.targetX = nearEnemy.gridX + (nearEnemy.width || 0) / 2;
+        marine.targetY = nearEnemy.gridY + (nearEnemy.height || 0) / 2;
     }
 }
 
@@ -292,16 +321,42 @@ function runEnemyAIDecision(entities, enemyMap) {
     const enemyCc = enemyEntities.find(e => e.type === ENTITY_TYPES.COMMAND_CENTER);
     if (!enemyCc || !enemyMap) return;
     const scvCount = enemyEntities.filter(e => e.type === ENTITY_TYPES.SCV).length;
-    const hasDepot = enemyEntities.some(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT);
-    const supplyCap = enemyMap.supplyCap || 11;
+    const depotCount = enemyEntities.filter(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT).length;
+    const depotComplete = enemyEntities.some(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT && (e.buildProgress === undefined || e.buildProgress >= 100));
+    const barracksCount = enemyEntities.filter(e => e.type === ENTITY_TYPES.BARRACKS).length;
     const supply = enemyMap.supply || 0;
+    const supplyBlocked = !hasSupplySpace(enemyMap, 1);
 
     if (enemyCc.buildQueue && enemyCc.buildQueue.length > 0) return;
-    if (!hasSupplySpace({ supply, supplyCap }, 1) && !hasDepot) return;
-    if (scvCount < 8 && canAfford(enemyMap, { minerals: 50 }) && hasSupplySpace({ supply, supplyCap }, 1)) {
+
+    if (depotCount < 1 && supply >= 10 && canAfford(enemyMap, { minerals: 100 })) {
+        if (tryBuild(entities, enemyMap, ENTITY_TYPES.SUPPLY_DEPOT, 'enemy')) return;
+    }
+    if (depotCount < 2 && supply >= 17 && canAfford(enemyMap, { minerals: 100 })) {
+        if (tryBuild(entities, enemyMap, ENTITY_TYPES.SUPPLY_DEPOT, 'enemy')) return;
+    }
+    if (barracksCount < 1 && depotComplete && supply >= 12 && canAfford(enemyMap, { minerals: 150 })) {
+        if (tryBuild(entities, enemyMap, ENTITY_TYPES.BARRACKS, 'enemy')) return;
+    }
+    if (barracksCount < 2 && depotComplete && canAfford(enemyMap, { minerals: 150 })) {
+        if (tryBuild(entities, enemyMap, ENTITY_TYPES.BARRACKS, 'enemy')) return;
+    }
+    if (scvCount < 16 && canAfford(enemyMap, { minerals: 50 }) && hasSupplySpace(enemyMap, 1)) {
         enemyCc.buildQueue = enemyCc.buildQueue || [];
         enemyCc.buildQueue.push({ type: ENTITY_TYPES.SCV, buildTime: UNITS[ENTITY_TYPES.SCV].buildTime, cost: { minerals: 50 }, supplyCost: 1 });
         enemyMap.minerals -= 50;
+        return;
+    }
+    const enemyBarracks = enemyEntities.filter(e => e.type === ENTITY_TYPES.BARRACKS && (e.buildProgress === undefined || e.buildProgress >= 100));
+    const marineCount = enemyEntities.filter(e => e.type === ENTITY_TYPES.MARINE).length;
+    for (const b of enemyBarracks) {
+        if (b.buildQueue && b.buildQueue.length > 0) continue;
+        if (marineCount < 15 && canAfford(enemyMap, { minerals: 50 }) && hasSupplySpace(enemyMap, 1)) {
+            b.buildQueue = b.buildQueue || [];
+            b.buildQueue.push({ type: ENTITY_TYPES.MARINE, buildTime: UNITS[ENTITY_TYPES.MARINE].buildTime, cost: { minerals: 50 }, supplyCost: 1 });
+            enemyMap.minerals -= 50;
+            return;
+        }
     }
 }
 
@@ -362,12 +417,16 @@ function runAIDecision(entities, map) {
     }
 }
 
-function tryBuild(entities, map, buildingType) {
+function tryBuild(entities, map, buildingType, faction) {
     const def = BUILDINGS[buildingType];
-    if (!def || !canAfford(map, def.cost)) return null;
-    if (def.requires && !entities.some(e => e.type === def.requires)) return null;
-
-    const cc = entities.find(e => e.type === ENTITY_TYPES.COMMAND_CENTER);
+    const useMap = map;
+    if (!def || !canAfford(useMap, def.cost)) return null;
+    const isEnemy = faction === 'enemy';
+    if (def.requires) {
+        const hasReq = entities.some(e => e.type === def.requires && (isEnemy ? e.faction === 'enemy' : !e.faction || e.faction === 'player'));
+        if (!hasReq) return null;
+    }
+    const cc = entities.find(e => e.type === ENTITY_TYPES.COMMAND_CENTER && (isEnemy ? e.faction === 'enemy' : !e.faction || e.faction === 'player'));
     if (!cc) return null;
 
     const offsets = [[3, 0], [-3, 0], [0, 3], [0, -3], [3, 2], [-3, 2], [2, 3], [-2, 3], [4, 0], [-4, 1], [5, 1], [-2, 4], [2, -2], [0, 5], [5, -1], [-4, 2]];
@@ -383,10 +442,11 @@ function tryBuild(entities, map, buildingType) {
                     e.gridY < gy + def.height && e.gridY + eh > gy;
             });
             if (!blocking) {
-                map.minerals -= def.cost.minerals;
+                useMap.minerals -= def.cost.minerals;
                 const b = createEntity(buildingType, gx, gy);
                 b.buildProgress = 0;
                 b.buildTimeTotal = def.buildTime;
+                if (isEnemy) b.faction = 'enemy';
                 entities.push(b);
                 return b;
             }

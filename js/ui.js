@@ -285,8 +285,8 @@ function initUI(game) {
                 if (h2) h2.textContent = 'DEFEAT';
                 if (p) p.textContent = 'Your forces have been destroyed.';
             } else {
-                if (h2) h2.textContent = 'VICTORY';
-                if (p) p.textContent = 'Colony established.';
+                if (h2) h2.textContent = 'GAME OVER';
+                if (p) p.textContent = 'No victor.';
             }
             winOverlay.classList.remove('hidden');
         },
