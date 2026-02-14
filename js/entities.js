@@ -78,10 +78,10 @@ function createInitialState() {
         supplyCap: 17,
     };
 
-    // Far left = Player 1 (yellow); Far right = Red player (enemy)
-    // Top corners = bases; Bottom corners = empty expansion for either player
+    // Far left = Yellow (bottom-left); Far right = Red (top-right) — diagonally opposite, equal distance
+    // Empty expansion corners (top-left, bottom-right) = mineral-rich, neither player starts there
     const ccX = 4;
-    const ccY = 4;
+    const ccY = CONFIG.MAP_ROWS - 8;
     const cc = createEntity(ENTITY_TYPES.COMMAND_CENTER, ccX, ccY);
     entities.push(cc);
 
@@ -98,9 +98,9 @@ function createInitialState() {
     eScv.targetId = null;
     entities.push(eScv);
 
-    // Minerals: around each base + dense bottom corners (expansion) so players survive longer
+    // Minerals: around each base + dense EMPTY corners (top-left, bottom-right) — neither player starts there
     const allMineralPositions = [
-        // Player base (top-left / far left)
+        // Player base (bottom-left / far left)
         [ccX + 4, ccY - 2], [ccX + 3, ccY - 1], [ccX + 6, ccY - 3], [ccX + 2, ccY - 2],
         [ccX - 1, ccY + 1], [ccX + 7, ccY], [ccX + 5, ccY - 4], [ccX + 1, ccY - 3],
         [ccX + 8, ccY - 1], [ccX + 2, ccY + 2], [ccX - 2, ccY - 1], [ccX + 9, ccY - 3],
@@ -109,18 +109,18 @@ function createInitialState() {
         [enemyX + 2, enemyY - 3], [enemyX - 1, enemyY + 2], [enemyX + 3, enemyY],
         [enemyX + 4, enemyY - 1], [enemyX - 4, enemyY], [enemyX + 2, enemyY + 2],
         [enemyX - 2, enemyY + 3], [enemyX + 5, enemyY - 2], [enemyX - 5, enemyY + 1],
-        // Bottom-left corner (empty expansion - build toward from either player)
-        [2, 35], [4, 34], [6, 35], [3, 33], [5, 36], [8, 34], [10, 35], [7, 37], [2, 38], [6, 36],
-        [11, 35], [4, 37], [9, 38], [12, 36], [3, 39], [10, 37], [1, 36], [5, 38], [7, 35], [9, 36],
-        [2, 33], [4, 36], [6, 38], [8, 37], [10, 38], [11, 37], [3, 37], [5, 34], [7, 39], [9, 34],
-        [1, 34], [2, 37], [4, 38], [6, 34], [8, 35], [10, 34], [11, 36], [12, 38],
-        // Bottom-right corner (empty expansion - build toward from either player)
+        // Top-left corner (empty expansion — neither player starts here)
+        [2, 2], [4, 3], [6, 2], [3, 5], [5, 6], [8, 4], [10, 3], [7, 7], [2, 8], [6, 9],
+        [11, 5], [4, 10], [9, 8], [12, 7], [3, 12], [10, 10], [1, 6], [5, 4], [7, 2], [9, 6],
+        [2, 4], [4, 7], [6, 11], [8, 9], [10, 5], [11, 8], [3, 3], [5, 9], [7, 4], [9, 11],
+        [1, 4], [2, 6], [4, 2], [6, 5], [8, 2], [10, 7], [11, 10], [12, 4], [3, 8], [5, 2],
+        // Bottom-right corner (empty expansion — neither player starts here)
         [37, 37], [35, 36], [33, 35], [36, 34], [38, 35], [34, 37], [37, 33], [35, 38],
         [32, 36], [36, 32], [33, 38], [38, 33], [30, 35], [35, 30], [31, 37], [37, 35], [39, 36],
         [34, 35], [36, 37], [38, 38], [33, 34], [35, 33], [39, 34], [37, 36], [34, 38],
         [31, 36], [33, 37], [36, 35], [38, 37], [32, 38], [35, 37], [39, 38], [37, 38], [36, 39],
         [34, 36], [38, 35], [33, 39], [35, 34], [31, 38], [32, 37],
-        // Mid-map (contested - fight toward each other)
+        // Mid-map (contested — fight toward each other)
         [18, 18], [20, 17], [22, 19], [19, 22], [21, 21], [17, 20], [23, 18], [20, 24],
         [24, 20], [16, 22], [22, 16], [25, 23], [15, 25], [26, 15],
     ];
@@ -140,7 +140,7 @@ function createInitialState() {
             explored[r][c] = false;
         }
     }
-    // Player starts with vision around their base (top-left / far left)
+    // Player starts with vision around their base (bottom-left / far left)
     for (let r = ccY - 4; r <= ccY + 6; r++) {
         for (let c = ccX - 4; c <= ccX + 10; c++) {
             if (r >= 0 && r < CONFIG.MAP_ROWS && c >= 0 && c < CONFIG.MAP_COLS) {
