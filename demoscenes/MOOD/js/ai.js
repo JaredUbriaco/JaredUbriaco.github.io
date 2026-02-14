@@ -28,9 +28,11 @@ import { angleTo, distanceTo, normalizeAngle } from './utils.js';
 // combatPointBlankDist: when enemy within this (tiles), use combatFacingToleranceClose for fire check.
 // aimDeadZone: if |angleDiff| < this (rad), don't turn — stops left-right oscillation when nearly aligned.
 // noOvershootFrac: cap turn so we never rotate more than this fraction of angleDiff per frame (stops overshoot jitter).
+// combatBackUpDist: when enemy closer than this (tiles), back up instead of strafe (create separation).
 export const AI_TUNING = {
     combatMaxRange: 12,
     combatNoAdvanceDist: 3,
+    combatBackUpDist: 1.5,
     combatPointBlankDist: 2,
     turnGain: 10,
     lookDxMax: 28,
@@ -45,6 +47,7 @@ export const AI_TUNING = {
 
 const COMBAT_MAX_RANGE = AI_TUNING.combatMaxRange;
 const COMBAT_NO_ADVANCE_DIST = AI_TUNING.combatNoAdvanceDist;
+const COMBAT_BACK_UP_DIST = AI_TUNING.combatBackUpDist;
 const TURN_GAIN = AI_TUNING.turnGain;
 const LOOK_DX_MAX = AI_TUNING.lookDxMax;
 const FACING_TOLERANCE = AI_TUNING.facingTolerance;
@@ -73,23 +76,29 @@ function buildScriptedRoute() {
     return [
         { label: 'handgun', x: handgun.x, y: handgun.y, action: 'interact', doneWhen: (s) => s.player.weapons && s.player.weapons.includes('HANDGUN') },
         { label: 'door_area0_hall', x: 8.5, y: 5.5, action: 'interact', doorKey: '8,5', doneWhen: (s) => (doors['8,5'] && doors['8,5'].openProgress >= 1) },
-        { label: 'enter_area1', x: a1.x + a1.w / 2, y: a1.y + a1.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'area1' },
+        { label: 'enter_area1', x: a1.x + a1.w / 2, y: a1.y + a1.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'area1' && isRoomClear(s, 'area1') },
         { label: 'button', x: button.x, y: button.y, action: 'interact', doneWhen: (s) => !!s.flags.buttonPressed },
         { label: 'gate_area2', x: 19.5, y: 15.5, action: 'interact', doorKey: '19,15', doneWhen: (s) => (doors['19,15'] && doors['19,15'].openProgress >= 1) },
-        { label: 'enter_a2r1', x: a2r1.x + a2r1.w / 2, y: a2r1.y + a2r1.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r1' },
+        { label: 'enter_a2r1', x: a2r1.x + a2r1.w / 2, y: a2r1.y + a2r1.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r1' && isRoomClear(s, 'a2r1') },
         { label: 'door_a2r2', x: 14.5, y: 26.5, action: 'interact', doorKey: '14,26', doneWhen: (s) => (doors['14,26'] && doors['14,26'].openProgress >= 1) },
-        { label: 'enter_a2r2', x: a2r2.x + a2r2.w / 2, y: a2r2.y + a2r2.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r2' },
+        { label: 'enter_a2r2', x: a2r2.x + a2r2.w / 2, y: a2r2.y + a2r2.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r2' && isRoomClear(s, 'a2r2') },
         { label: 'door_a2r1_a2r3', x: 19.5, y: 30.5, action: 'interact', doorKey: '19,30', doneWhen: (s) => (doors['19,30'] && doors['19,30'].openProgress >= 1) },
-        { label: 'enter_a2r3', x: a2r3.x + a2r3.w / 2, y: a2r3.y + a2r3.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r3' },
+        { label: 'enter_a2r3', x: a2r3.x + a2r3.w / 2, y: a2r3.y + a2r3.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r3' && isRoomClear(s, 'a2r3') },
         { label: 'door_a2r4', x: 31.5, y: 36.5, action: 'interact', doorKey: '31,36', doneWhen: (s) => (doors['31,36'] && doors['31,36'].openProgress >= 1) },
         { label: 'shotgun', x: shotgun.x, y: shotgun.y, action: 'interact', doneWhen: (s) => s.player.weapons && s.player.weapons.includes('SHOTGUN') },
         { label: 'door_a2r5', x: 19.5, y: 42.5, action: 'interact', doorKey: '19,42', doneWhen: (s) => (doors['19,42'] && doors['19,42'].openProgress >= 1) },
-        { label: 'enter_a2r5', x: a2r5.x + a2r5.w / 2, y: a2r5.y + a2r5.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r5' },
+        { label: 'enter_a2r5', x: a2r5.x + a2r5.w / 2, y: a2r5.y + a2r5.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r5' && isRoomClear(s, 'a2r5') },
         { label: 'keydoor_boss', x: 19.5, y: 54.5, action: 'interact', doorKey: '19,54', doneWhen: (s) => (doors['19,54'] && doors['19,54'].openProgress >= 1) },
         { label: 'voidbeam', x: voidbeam.x, y: voidbeam.y, action: 'interact', doneWhen: (s) => s.player.weapons && s.player.weapons.includes('VOIDBEAM') },
-        { label: 'enter_area3', x: a3.x + a3.w / 2, y: a3.y + a3.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'area3' },
+        { label: 'enter_area3', x: a3.x + a3.w / 2, y: a3.y + a3.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'area3' && isRoomClear(s, 'area3') },
         { label: 'light_well_boss', x: a3.x + a3.w / 2, y: a3.y + a3.h / 2 + 4, doneWhen: (s) => !!s.flags.voidBeamLightZoneUsed },
     ];
+}
+
+/** True if the given room has no live enemies (so we can advance past "enter_room" step). */
+function isRoomClear(state, roomId) {
+    const entities = state.entities || [];
+    return !entities.some((e) => e.roomId === roomId && e.hp > 0);
 }
 
 let SCRIPTED_ROUTE = null;
@@ -152,9 +161,16 @@ function bfsPath(sx, sy, ex, ey) {
     return null;
 }
 
-/** Path from player to goal; uses approach tile for doors/interact. */
-function getPathToGoal(px, py, goal) {
-    const sx = Math.floor(px), sy = Math.floor(py);
+const PATH_CACHE_TTL = 0.5;
+let pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, time: -1 };
+
+/** Path from player to goal; uses approach tile for doors/interact. Caches result for PATH_CACHE_TTL sec. */
+function getPathToGoal(state, goal) {
+    const px = state.player.x;
+    const py = state.player.y;
+    const elapsed = state.time.elapsed || 0;
+    const sx = Math.floor(px);
+    const sy = Math.floor(py);
     let ex, ey;
     if (goal.type === 'door' && goal.door) {
         const a = getApproachTile(goal.door.x + 0.5, goal.door.y + 0.5, px, py);
@@ -165,7 +181,17 @@ function getPathToGoal(px, py, goal) {
     } else {
         ex = Math.floor(goal.x); ey = Math.floor(goal.y);
     }
-    return bfsPath(sx, sy, ex, ey);
+
+    if (pathCache.path && pathCache.sx === sx && pathCache.sy === sy && pathCache.ex === ex && pathCache.ey === ey && (elapsed - pathCache.time) < PATH_CACHE_TTL) {
+        return pathCache.path;
+    }
+    const path = bfsPath(sx, sy, ex, ey);
+    if (path) {
+        pathCache = { path, sx, sy, ex, ey, time: elapsed };
+    } else {
+        pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, time: elapsed };
+    }
+    return path;
 }
 
 // ── Line of sight ────────────────────────────────────────────────────
@@ -292,7 +318,7 @@ function getSteerTarget(state, goal) {
     if (goal.type === 'enemy' || goal.action === 'fire') {
         return { x: goal.x, y: goal.y };
     }
-    const path = getPathToGoal(p.x, p.y, goal);
+    const path = getPathToGoal(state, goal);
     if (!path || path.length <= 1) return { x: goal.x, y: goal.y };
     for (let i = 1; i < path.length; i++) {
         const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
@@ -325,8 +351,16 @@ function steerToward(state, goal) {
 
     if (inCombatStandoff) {
         inp.moveForward = false;
-        inp.strafeLeft = false;
-        inp.strafeRight = false;
+        if (distToTarget < COMBAT_BACK_UP_DIST) {
+            inp.moveBack = true;
+            inp.strafeLeft = false;
+            inp.strafeRight = false;
+        } else {
+            inp.moveBack = false;
+            const phase = Math.floor((state.time.elapsed || 0) / 1.2) % 2;
+            inp.strafeLeft = phase === 0;
+            inp.strafeRight = phase === 1;
+        }
         return;
     }
 
