@@ -16,7 +16,7 @@ import {
     isSolid, getRoomId, doors, getMapWidth, getMapHeight,
     PICKUP_POSITIONS, INTERACTABLE_POSITIONS, ROOM_BOUNDS,
 } from './map.js';
-import { TILE, INTERACTION_RANGE, INTERACTION_ANGLE, PLAYER_RADIUS } from './config.js';
+import { TILE, INTERACTION_RANGE, INTERACTION_ANGLE, PLAYER_RADIUS, MOUSE_SENSITIVITY } from './config.js';
 import { getCurrentObjectiveTask } from './objectives.js';
 import { angleTo, distanceTo, normalizeAngle } from './utils.js';
 
@@ -26,13 +26,16 @@ import { angleTo, distanceTo, normalizeAngle } from './utils.js';
 // combatFacingTolerance: handgun is hitscan (single ray) — only fire when aimed within this (rad).
 // combatNoAdvanceDist: when enemy is this close (tiles), do NOT move forward — only turn and fire.
 // combatPointBlankDist: when enemy within this (tiles), use combatFacingToleranceClose for fire check.
-//   At point-blank, enemy movement makes tight aim hard; slight relax gets shots off.
+// aimDeadZone: if |angleDiff| < this (rad), don't turn — stops left-right oscillation when nearly aligned.
+// noOvershootFrac: cap turn so we never rotate more than this fraction of angleDiff per frame (stops overshoot jitter).
 export const AI_TUNING = {
     combatMaxRange: 12,
     combatNoAdvanceDist: 3,
     combatPointBlankDist: 2,
     turnGain: 10,
     lookDxMax: 28,
+    aimDeadZone: 0.02,
+    noOvershootFrac: 0.9,
     facingTolerance: 0.2,
     combatFacingTolerance: 0.05,
     combatFacingToleranceClose: 0.09,
@@ -48,6 +51,8 @@ const FACING_TOLERANCE = AI_TUNING.facingTolerance;
 const COMBAT_FACING_TOLERANCE = AI_TUNING.combatFacingTolerance;
 const COMBAT_FACING_TOLERANCE_CLOSE = AI_TUNING.combatFacingToleranceClose;
 const COMBAT_POINT_BLANK_DIST = AI_TUNING.combatPointBlankDist;
+const AIM_DEAD_ZONE = AI_TUNING.aimDeadZone;
+const NO_OVERSHOOT_FRAC = AI_TUNING.noOvershootFrac;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
 
 // ── Scripted route (1990s-style: fixed sequence to complete the level) ─
@@ -304,7 +309,15 @@ function steerToward(state, goal) {
     const target = getSteerTarget(state, goal);
     const wantAngle = angleTo(p.x, p.y, target.x, target.y);
     const angleDiff = normalizeAngle(wantAngle - p.angle);
-    inp.lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, angleDiff * TURN_GAIN));
+
+    if (Math.abs(angleDiff) <= AIM_DEAD_ZONE) {
+        inp.lookDX = 0;
+    } else {
+        let lookDX = angleDiff * TURN_GAIN;
+        const maxTurnPerFrame = (Math.abs(angleDiff) * NO_OVERSHOOT_FRAC) / MOUSE_SENSITIVITY;
+        lookDX = Math.max(-maxTurnPerFrame, Math.min(maxTurnPerFrame, lookDX));
+        inp.lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, lookDX));
+    }
     inp.lookDY = 0;
 
     const distToTarget = distanceTo(p.x, p.y, target.x, target.y);
