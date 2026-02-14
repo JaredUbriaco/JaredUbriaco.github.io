@@ -33,18 +33,27 @@ function createEntity(type, gridX, gridY, overrides = {}) {
             targetX: null,
             targetY: null,
             targetId: null,
-            state: 'idle', // idle, moving_to_mineral, mining, returning
+            state: 'idle',
             miningProgress: 0,
             moveSpeed: def.moveSpeed,
+            health: def.health,
+            maxHealth: def.health,
+            armor: def.armor || 0,
         }, overrides);
     }
 
     if (type === ENTITY_TYPES.MARINE) {
+        const def = UNITS[ENTITY_TYPES.MARINE];
         return Object.assign(base, {
             targetX: null,
             targetY: null,
+            targetId: null,
             state: 'idle',
-            moveSpeed: 3,
+            moveSpeed: def.moveSpeed,
+            health: def.health,
+            maxHealth: def.health,
+            armor: def.armor || 0,
+            attackCooldown: 0,
         }, overrides);
     }
 
@@ -54,8 +63,11 @@ function createEntity(type, gridX, gridY, overrides = {}) {
         return Object.assign(base, {
             width: def.width,
             height: def.height,
-            buildProgress: 100, // 0-100, 100 = complete
+            buildProgress: 100,
             buildQueue: [],
+            health: def.health,
+            maxHealth: def.health,
+            armor: def.armor || 0,
         }, overrides);
     }
 

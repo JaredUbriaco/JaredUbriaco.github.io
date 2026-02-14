@@ -275,7 +275,21 @@ function initUI(game) {
         updateResourceUI,
         updateSelectionPanel,
         setStatus: (text) => { statusText.textContent = text; },
-        showWin: () => { winOverlay.classList.remove('hidden'); },
+        showWin: (winner) => {
+            const h2 = winOverlay.querySelector('h2');
+            const p = winOverlay.querySelector('p');
+            if (winner === 'player') {
+                if (h2) h2.textContent = 'VICTORY';
+                if (p) p.textContent = 'Enemy eliminated.';
+            } else if (winner === 'enemy') {
+                if (h2) h2.textContent = 'DEFEAT';
+                if (p) p.textContent = 'Your forces have been destroyed.';
+            } else {
+                if (h2) h2.textContent = 'VICTORY';
+                if (p) p.textContent = 'Colony established.';
+            }
+            winOverlay.classList.remove('hidden');
+        },
         getBoxSelect: () => ({ start: boxSelectStart, current: boxSelectCurrent }),
     };
 }

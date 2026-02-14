@@ -121,6 +121,18 @@ function drawMineralPatch(entity, ox, oy) {
     ctx.globalAlpha = 1;
 }
 
+function drawHealthBar(sx, sy, w, entity) {
+    if (entity.health === undefined || entity.maxHealth === undefined) return;
+    if (entity.health >= entity.maxHealth) return;
+    const pct = Math.max(0, entity.health / entity.maxHealth);
+    const barW = w || 20;
+    const barH = 3;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(sx - barW / 2, sy - 10, barW, barH);
+    ctx.fillStyle = pct > 0.5 ? '#22c55e' : pct > 0.25 ? '#eab308' : '#ef4444';
+    ctx.fillRect(sx - barW / 2, sy - 10, barW * pct, barH);
+}
+
 function drawBuilding(entity, ox, oy) {
     const def = BUILDINGS[entity.type];
     if (!def) return;
@@ -155,6 +167,7 @@ function drawBuilding(entity, ox, oy) {
         ctx.lineWidth = 2;
         ctx.strokeRect(sx - 2, sy - 2, w + 4, h + 4);
     }
+    drawHealthBar(sx, sy, w, entity);
 }
 
 function drawSCV(entity, ox, oy) {
@@ -194,6 +207,7 @@ function drawSCV(entity, ox, oy) {
         ctx.arc(sx, sy, 8, 0, Math.PI * 2);
         ctx.stroke();
     }
+    drawHealthBar(sx, sy - 8, 16, entity);
 }
 
 function drawEnemyEntity(entity, ox, oy) {
@@ -214,6 +228,7 @@ function drawEnemyEntity(entity, ox, oy) {
             ctx.lineWidth = 2;
             ctx.strokeRect(sx - 2, sy - 2, w + 4, h + 4);
         }
+        drawHealthBar(sx + w / 2, sy, w, entity);
     } else if (entity.type === ENTITY_TYPES.SCV) {
         const { x, y } = worldToScreen(entity.gridX, entity.gridY);
         const sx = x + ox;
@@ -227,6 +242,7 @@ function drawEnemyEntity(entity, ox, oy) {
         ctx.strokeRect(sx - 4, sy - 1, 8, 5);
         ctx.strokeRect(sx - 5, sy - 4, 2, 5);
         ctx.strokeRect(sx + 3, sy - 4, 2, 5);
+        drawHealthBar(sx, sy - 8, 16, entity);
         if (entity.selected) {
             ctx.strokeStyle = COLORS.enemySelection;
             ctx.lineWidth = 2;
@@ -240,6 +256,7 @@ function drawEnemyEntity(entity, ox, oy) {
         ctx.fillRect(sx - 4, sy - 3, 8, 6);
         ctx.fillStyle = '#991b1b';
         ctx.fillRect(sx + 4, sy - 1, 6, 2);
+        drawHealthBar(sx, sy - 8, 16, entity);
         if (entity.selected) {
             ctx.strokeStyle = COLORS.enemySelection;
             ctx.lineWidth = 2;
@@ -265,6 +282,7 @@ function drawMarine(entity, ox, oy) {
         ctx.arc(sx, sy, 7, 0, Math.PI * 2);
         ctx.stroke();
     }
+    drawHealthBar(sx, sy - 8, 16, entity);
 }
 
 function isExplored(explored, gridX, gridY, width, height) {

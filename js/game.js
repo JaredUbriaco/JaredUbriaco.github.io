@@ -126,6 +126,7 @@
             while (accumulated >= 16) {
                 accumulated -= 16;
                 state.entities.forEach(e => updateEntity(e, state.entities, state.map, 16, state.enemyMap));
+                processDeaths(state.entities, state.map, state.enemyMap);
                 updateExplored(state.entities, state.explored);
                 aiCooldown++;
                 if (aiCooldown >= 15) {
@@ -143,8 +144,9 @@
             ui.updateSelectionPanel();
         }
 
-        if (checkWinCondition(state.entities, state.map)) {
-            if (ui) ui.showWin();
+        const winner = checkWinCondition(state.entities, state.map);
+        if (winner) {
+            if (ui) ui.showWin(winner);
             return;
         }
 
