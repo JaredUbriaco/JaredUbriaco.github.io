@@ -128,7 +128,7 @@
                 state.entities.forEach(e => updateEntity(e, state.entities, state.map, 16, state.enemyMap));
                 updateExplored(state.entities, state.explored);
                 aiCooldown++;
-                if (aiCooldown >= 30) {
+                if (aiCooldown >= 15) {
                     aiCooldown = 0;
                     runAIDecision(state.entities, state.map);
                     runEnemyAIDecision(state.entities, state.enemyMap);
@@ -154,7 +154,7 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    if (!state.enemyMap) state.enemyMap = { minerals: 0, supply: 0, supplyCap: 17 };
+    if (!state.enemyMap) state.enemyMap = { minerals: 0, supply: 6, supplyCap: 11 };
     if (!state.explored) {
         state.explored = [];
         for (let r = 0; r < CONFIG.MAP_ROWS; r++) {

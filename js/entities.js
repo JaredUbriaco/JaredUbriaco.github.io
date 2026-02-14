@@ -67,36 +67,44 @@ function createInitialState() {
     const map = {
         minerals: 50,
         vespene: 0,
-        supply: 1,
-        supplyCap: 17,
+        supply: 6,
+        supplyCap: 11,
         mineralsCollected: 0,
     };
     const enemyMap = {
-        minerals: 30,
+        minerals: 50,
         vespene: 0,
-        supply: 1,
-        supplyCap: 17,
+        supply: 6,
+        supplyCap: 11,
     };
 
-    // Far left = Yellow (bottom-left); Far right = Red (top-right) — diagonally opposite, equal distance
-    // Empty expansion corners (top-left, bottom-right) = mineral-rich, neither player starts there
+    // Far left = Yellow (bottom-left); Far right = Red (top-right) — diagonally opposite
+    // Empty expansion corners (top-left, bottom-right) = mineral-rich
     const ccX = 4;
     const ccY = CONFIG.MAP_ROWS - 8;
     const cc = createEntity(ENTITY_TYPES.COMMAND_CENTER, ccX, ccY);
+    cc.buildQueue = [{ type: ENTITY_TYPES.SCV, buildTime: UNITS[ENTITY_TYPES.SCV].buildTime, cost: { minerals: 50 }, supplyCost: 1 }];
+    map.minerals = 0;
     entities.push(cc);
 
-    const scv = createEntity(ENTITY_TYPES.SCV, ccX + 4, ccY);
-    entities.push(scv);
+    for (let i = 0; i < 6; i++) {
+        const scv = createEntity(ENTITY_TYPES.SCV, ccX + 4 + (i % 3), ccY + Math.floor(i / 3));
+        entities.push(scv);
+    }
 
     const enemyX = CONFIG.MAP_COLS - 8;
     const enemyY = 4;
     const eCc = createEntity(ENTITY_TYPES.COMMAND_CENTER, enemyX, enemyY);
     eCc.faction = 'enemy';
+    eCc.buildQueue = [{ type: ENTITY_TYPES.SCV, buildTime: UNITS[ENTITY_TYPES.SCV].buildTime, cost: { minerals: 50 }, supplyCost: 1 }];
+    enemyMap.minerals = 0;
     entities.push(eCc);
-    const eScv = createEntity(ENTITY_TYPES.SCV, enemyX + 4, enemyY);
-    eScv.faction = 'enemy';
-    eScv.targetId = null;
-    entities.push(eScv);
+    for (let i = 0; i < 6; i++) {
+        const eScv = createEntity(ENTITY_TYPES.SCV, enemyX + 4 + (i % 3), enemyY + Math.floor(i / 3));
+        eScv.faction = 'enemy';
+        eScv.targetId = null;
+        entities.push(eScv);
+    }
 
     // Minerals: around each base + dense EMPTY corners (top-left, bottom-right) — neither player starts there
     const allMineralPositions = [

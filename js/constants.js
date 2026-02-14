@@ -15,13 +15,13 @@ const CONFIG = {
     },
 };
 
-// Build order thresholds (SC2-style)
+// Build order thresholds (SC2 standard opener)
 const BUILD_ORDER = {
-    SUPPLY_DEPOT_WHEN_SUPPLY_USED: 10,   // Build depot when supply at/near cap (10-12 used)
-    SCVS_MIN_FOR_DEPOT: 10,              // Minimum SCVs before depot allowed
-    SCVS_TARGET_BEFORE_DEPOT: 12,        // Aim for 10-12 SCVs before first depot
-    SCVS_BEFORE_BARRACKS: 13,            // 13-15 SCVs before barracks
-    SCVS_IDEAL_SINGLE_BASE: 22,          // 16 minerals + 6 gas per base (gas not implemented)
+    FIRST_DEPOT_AT_SUPPLY: 10,           // ~1:00-1:15 — build Supply Depot (100 minerals)
+    FIRST_BARRACKS_AT_SUPPLY: 12,        // ~1:30 — build Barracks (150 minerals)
+    SECOND_DEPOT_AT_SUPPLY: 17,         // 17-18 supply — second Supply Depot
+    SCVS_BEFORE_FIRST_DEPOT: 7,         // 6 start + 1 building — aim for 7 before depot
+    SCVS_TARGET: 16,                    // 16 per mineral line (saturation)
 };
 
 const ENTITY_TYPES = {

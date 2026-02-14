@@ -226,7 +226,7 @@ function runEnemyAIDecision(entities, enemyMap) {
     if (!enemyCc || !enemyMap) return;
     const scvCount = enemyEntities.filter(e => e.type === ENTITY_TYPES.SCV).length;
     const hasDepot = enemyEntities.some(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT);
-    const supplyCap = enemyMap.supplyCap || 17;
+    const supplyCap = enemyMap.supplyCap || 11;
     const supply = enemyMap.supply || 0;
 
     if (enemyCc.buildQueue && enemyCc.buildQueue.length > 0) return;
@@ -235,35 +235,42 @@ function runEnemyAIDecision(entities, enemyMap) {
         enemyCc.buildQueue = enemyCc.buildQueue || [];
         enemyCc.buildQueue.push({ type: ENTITY_TYPES.SCV, buildTime: UNITS[ENTITY_TYPES.SCV].buildTime, cost: { minerals: 50 }, supplyCost: 1 });
         enemyMap.minerals -= 50;
-        enemyMap.supply = (enemyMap.supply || 0) + 1;
     }
 }
 
 function runAIDecision(entities, map) {
-    const scvCount = entities.filter(e => e.type === ENTITY_TYPES.SCV).length;
-    const hasDepot = entities.some(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT);
-    const depotComplete = entities.some(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT && (e.buildProgress === undefined || e.buildProgress >= 100));
-    const hasBarracks = entities.some(e => e.type === ENTITY_TYPES.BARRACKS);
+    const playerEntities = entities.filter(e => !e.faction || e.faction === 'player');
+    const scvCount = playerEntities.filter(e => e.type === ENTITY_TYPES.SCV).length;
+    const depotCount = playerEntities.filter(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT).length;
+    const depotComplete = playerEntities.some(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT && (e.buildProgress === undefined || e.buildProgress >= 100));
+    const barracksCount = playerEntities.filter(e => e.type === ENTITY_TYPES.BARRACKS).length;
     const supply = map.supply || 0;
     const supplyBlocked = !hasSupplySpace(map, 1);
 
     for (const e of entities) {
+        if (e.faction && e.faction !== 'player') continue;
         if (e.type !== ENTITY_TYPES.COMMAND_CENTER && e.type !== ENTITY_TYPES.BARRACKS) continue;
         if (e.buildQueue && e.buildQueue.length > 0) continue;
 
         if (e.type === ENTITY_TYPES.COMMAND_CENTER) {
-            // Supply Depot: when at/near supply cap (10-12 used) with 10+ SCVs, or supply blocked
-            const nearSupplyCap = supply >= (BUILD_ORDER.SUPPLY_DEPOT_WHEN_SUPPLY_USED || 10);
-            const enoughScvsForDepot = scvCount >= (BUILD_ORDER.SCVS_MIN_FOR_DEPOT || 10);
-            if (!hasDepot && canAfford(map, { minerals: 100 }) &&
-                (supplyBlocked || (nearSupplyCap && enoughScvsForDepot))) {
-                tryBuild(entities, map, ENTITY_TYPES.SUPPLY_DEPOT);
-                continue;
+            // 10 supply: first Supply Depot (100 minerals) — ~1:00
+            if (depotCount < 1 && supply >= (BUILD_ORDER.FIRST_DEPOT_AT_SUPPLY || 10) && canAfford(map, { minerals: 100 })) {
+                if (tryBuild(entities, map, ENTITY_TYPES.SUPPLY_DEPOT)) continue;
             }
-            // SCVs: aim for 10-12 before depot, 13-15 before barracks, then up to ideal saturation
-            const scvTarget = !depotComplete ? (BUILD_ORDER.SCVS_TARGET_BEFORE_DEPOT || 12) :
-                !hasBarracks ? (BUILD_ORDER.SCVS_BEFORE_BARRACKS || 15) : (BUILD_ORDER.SCVS_IDEAL_SINGLE_BASE || 22);
-            if (scvCount < scvTarget && canAfford(map, UNITS[ENTITY_TYPES.SCV].cost) && hasSupplySpace(map, 1)) {
+            // 17-18 supply: second Supply Depot
+            if (depotCount < 2 && supply >= (BUILD_ORDER.SECOND_DEPOT_AT_SUPPLY || 17) && canAfford(map, { minerals: 100 })) {
+                if (tryBuild(entities, map, ENTITY_TYPES.SUPPLY_DEPOT)) continue;
+            }
+            // 12 supply: first Barracks (150 minerals) — ~1:30
+            if (barracksCount < 1 && depotComplete && supply >= (BUILD_ORDER.FIRST_BARRACKS_AT_SUPPLY || 12) && canAfford(map, { minerals: 150 })) {
+                if (tryBuild(entities, map, ENTITY_TYPES.BARRACKS)) continue;
+            }
+            // Second Barracks — ~2:15
+            if (barracksCount < 2 && depotComplete && canAfford(map, { minerals: 150 })) {
+                if (tryBuild(entities, map, ENTITY_TYPES.BARRACKS)) continue;
+            }
+            // SCVs: constant production up to 16 per mineral line
+            if (scvCount < (BUILD_ORDER.SCVS_TARGET || 16) && canAfford(map, UNITS[ENTITY_TYPES.SCV].cost) && hasSupplySpace(map, 1)) {
                 e.buildQueue.push({
                     type: ENTITY_TYPES.SCV,
                     buildTime: UNITS[ENTITY_TYPES.SCV].buildTime,
@@ -271,18 +278,11 @@ function runAIDecision(entities, map) {
                     supplyCost: 1,
                 });
                 map.minerals -= UNITS[ENTITY_TYPES.SCV].cost.minerals;
-                continue;
-            }
-            // Barracks: after depot complete, 13+ SCVs, 150 minerals
-            const enoughScvsForBarracks = scvCount >= (BUILD_ORDER.SCVS_BEFORE_BARRACKS || 13);
-            if (!hasBarracks && depotComplete && enoughScvsForBarracks && canAfford(map, { minerals: 150 })) {
-                tryBuild(entities, map, ENTITY_TYPES.BARRACKS);
             }
         }
-        if (e.type === ENTITY_TYPES.BARRACKS) {
-            // Marines: start immediately after Barracks finishes (no buildQueue = ready to produce)
-            const marineCount = entities.filter(x => x.type === ENTITY_TYPES.MARINE).length;
-            if (marineCount < 10 && canAfford(map, UNITS[ENTITY_TYPES.MARINE].cost) && hasSupplySpace(map, 1)) {
+        if (e.type === ENTITY_TYPES.BARRACKS && (e.buildProgress === undefined || e.buildProgress >= 100)) {
+            const marineCount = playerEntities.filter(x => x.type === ENTITY_TYPES.MARINE).length;
+            if (marineCount < 20 && canAfford(map, UNITS[ENTITY_TYPES.MARINE].cost) && hasSupplySpace(map, 1)) {
                 e.buildQueue.push({
                     type: ENTITY_TYPES.MARINE,
                     buildTime: UNITS[ENTITY_TYPES.MARINE].buildTime,
@@ -303,15 +303,18 @@ function tryBuild(entities, map, buildingType) {
     const cc = entities.find(e => e.type === ENTITY_TYPES.COMMAND_CENTER);
     if (!cc) return null;
 
-    const offsets = [[3, 0], [-3, 0], [0, 3], [0, -3], [3, 2], [-3, 2], [2, 3], [-2, 3], [4, 0], [-4, 1]];
+    const offsets = [[3, 0], [-3, 0], [0, 3], [0, -3], [3, 2], [-3, 2], [2, 3], [-2, 3], [4, 0], [-4, 1], [5, 1], [-2, 4], [2, -2], [0, 5], [5, -1], [-4, 2]];
     for (const [dx, dy] of offsets) {
         const gx = cc.gridX + dx;
         const gy = cc.gridY + dy;
         if (gx >= 0 && gx + def.width <= CONFIG.MAP_COLS && gy >= 0 && gy + def.height <= CONFIG.MAP_ROWS) {
-            const blocking = entities.some(e =>
-                e.gridX < gx + def.width && e.gridX + (e.width || 1) > gx &&
-                e.gridY < gy + def.height && e.gridY + (e.height || 1) > gy
-            );
+            const blocking = entities.some(e => {
+                if (e.type === ENTITY_TYPES.MINERAL_PATCH || e.type === ENTITY_TYPES.VESPENE_GEYSER) return false;
+                const ew = e.width || 1;
+                const eh = e.height || 1;
+                return e.gridX < gx + def.width && e.gridX + ew > gx &&
+                    e.gridY < gy + def.height && e.gridY + eh > gy;
+            });
             if (!blocking) {
                 map.minerals -= def.cost.minerals;
                 const b = createEntity(buildingType, gx, gy);
