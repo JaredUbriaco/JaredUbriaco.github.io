@@ -11,7 +11,7 @@ import {
 } from './config.js';
 
 import * as input from './input.js';
-import { PLAYER_SPAWN } from './map.js';
+import { PLAYER_SPAWN, resetDoors } from './map.js';
 import * as renderer from './renderer.js';
 import * as player from './player.js';
 import * as hud from './hud.js';
@@ -86,6 +86,8 @@ const state = {
         idleTimer: 0,
         currentTarget: null,
         waypointPath: [],
+        /** Telemetry for debug: state, targetId, confidence, stuckTimer, replanCount */
+        telemetry: {},
         input: {          // Synthetic input from AI
             moveForward: false,
             moveBack: false,
@@ -150,7 +152,7 @@ function updateDebug(dt) {
     const angleDeg = ((p.angle * 180 / Math.PI) % 360).toFixed(1);
     const aliveCount = state.entities.filter(e => e.hp > 0).length;
 
-    debugOverlay.textContent =
+    let debugText =
         `FPS: ${displayFps}\n` +
         `Pos: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}\n` +
         `Angle: ${angleDeg}° Pitch: ${p.pitch.toFixed(2)}\n` +
@@ -159,6 +161,15 @@ function updateDebug(dt) {
         `AI: ${state.ai.active ? 'ACTIVE' : 'inactive'}\n` +
         `Weapon: ${p.currentWeapon} [${p.weaponState.phase}]\n` +
         `Elapsed: ${state.time.elapsed.toFixed(1)}s`;
+    if (state.ai.active && state.ai.telemetry && Object.keys(state.ai.telemetry).length > 0) {
+        const t = state.ai.telemetry;
+        debugText +=
+            `\n— AI —\n` +
+            `State: ${t.state}  Target: ${t.targetId}\n` +
+            `Conf: ${t.confidence}  Stuck: ${t.stuckTimer}  Replan: ${t.replanCount}  Path: ${t.pathNodes ?? '—'} nodes\n` +
+            `Decision: ${t.decisionMs ?? '—'}ms  Plan: ${t.planMs ?? '—'}ms`;
+    }
+    debugOverlay.textContent = debugText;
 }
 
 // ── HUD DOM Updates ─────────────────────────────────────────────────
@@ -478,6 +489,92 @@ canvas.addEventListener('click', () => {
         input.requestLock(canvas);
     }
 });
+
+// ── Simulation tick & test init (for regression) ───────────────────
+const FIXED_DT = 1 / 60;
+
+/**
+ * Run one simulation tick without input or render. Caller should set state.ai.active.
+ * Advances state.time by dt.
+ */
+export function runSimulationTick(state, dt = FIXED_DT) {
+    const t = state.time;
+    t.dt = dt;
+    t.now += dt;
+    t.elapsed += dt;
+
+    objectives.updateObjectives(state);
+    state.ai.active = true;
+    ai.update(state);
+    player.update(state);
+    if (state.hud.roomChanged) state.hud.roomChanged = false;
+
+    entities.update(state);
+    projectiles.update(state);
+    pickups.update(state);
+    triggers.update(state);
+    combat.update(state);
+
+    if (state.effects.screenShake > 0) state.effects.screenShake--;
+    if (state.effects.distortion > 0) state.effects.distortion -= dt;
+
+    if (state.flags.victoryTriggered && state.effects.victoryAlpha < 1) {
+        state.effects.victoryAlpha = Math.min(1, state.effects.victoryAlpha + dt * 0.3);
+    }
+    if (state.pendingKeyDrop) {
+        const keyPos = state.pendingKeyDrop;
+        state.pickups.push({
+            type: 'ASTRAL_KEY',
+            x: keyPos.x, y: keyPos.y,
+            collected: false,
+            bobOffset: 0,
+            bobPhase: 0,
+        });
+        state.pendingKeyDrop = null;
+    }
+}
+
+/**
+ * Initialize state for regression: same as startGame() minus DOM/input.
+ * Resets doors, player, pickups, entities, objectives, flags.
+ */
+export function initGameStateForTest(state) {
+    state.flags.started = true;
+    state.flags.paused = false;
+    state.flags.bossActive = false;
+    state.flags.victoryTriggered = false;
+    state.flags.buttonPressed = false;
+    state.flags.voidBeamLightZoneUsed = false;
+    state.player.x = PLAYER_SPAWN.x;
+    state.player.y = PLAYER_SPAWN.y;
+    state.player.angle = PLAYER_SPAWN.angle;
+    state.player.weapons = ['FIST'];
+    state.player.currentWeapon = 'FIST';
+    state.player.hasAstralKey = false;
+    state.player.weaponState = { phase: 'idle', timer: 0, swapTarget: null };
+    state.pickups = pickups.createInitialPickups();
+    state.entities = entities.spawnInitialEntities();
+    state.projectiles = [];
+    state.objectives = objectives.createObjectivesState();
+    state.hud.killCount = 0;
+    state.hud.currentRoomId = null;
+    state.hud.messages = [];
+    state.effects.victoryAlpha = 0;
+    state.time.elapsed = 0;
+    resetDoors();
+}
+
+// ── Regression runner (deterministic autopilot scenarios) ───────────
+if (typeof window !== 'undefined') {
+    import('./regression.js').then((m) => {
+        window.runMOODRegression = () => {
+            const results = m.runRegression(state, { runSimulationTick, initGameStateForTest });
+            console.log('MOOD regression results:', results);
+            results.forEach((r) => console.log(`  ${r.scenario}: ${r.pass ? 'PASS' : 'FAIL'} — ${r.message}`));
+            return results;
+        };
+    }).catch(() => {});
+}
 
 // ── Export state for other modules ──────────────────────────────────
 export { state, ctx, canvas };

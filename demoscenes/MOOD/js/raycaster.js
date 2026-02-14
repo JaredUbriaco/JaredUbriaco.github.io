@@ -15,7 +15,7 @@ import {
     PITCH_SCALE,
 } from './config.js';
 
-import { getTile, isSolid, doors } from './map.js';
+import { getTile, isSolid, doors, INTERACTABLE_POSITIONS } from './map.js';
 
 // ── Z-Buffer (shared with sprite renderer) ──────────────────────────
 export const zBuffer = new Float32Array(INTERNAL_WIDTH);
@@ -67,6 +67,12 @@ function getWallColor(tileType, hitSide, distance) {
 
 function isDoorTile(tileType) {
     return tileType === TILE.DOOR || tileType === TILE.DOOR_LOCKED_BUTTON || tileType === TILE.DOOR_LOCKED_KEY;
+}
+
+function isButtonWallHit(hit) {
+    const button = INTERACTABLE_POSITIONS.area1Button;
+    if (!button) return false;
+    return hit.mapX === Math.floor(button.x) && hit.mapY === Math.floor(button.y) && hit.wallType === TILE.WALL;
 }
 
 // ── Ceiling & Floor Colors ──────────────────────────────────────────
@@ -138,7 +144,7 @@ function castRay(ox, oy, angle) {
         const tile = getTile(mapX, mapY);
 
         // Check if this tile is solid (wall, closed door, secret wall)
-        if (tile === TILE.WALL || tile === TILE.SECRET_WALL || tile === TILE.BUTTON) {
+        if (tile === TILE.WALL || tile === TILE.SECRET_WALL) {
             // Solid wall — calculate perpendicular distance
             let perpDist;
             if (hitSide === 0) {
@@ -276,6 +282,28 @@ export function renderWalls(ctx, player, timeNow) {
             }
             ctx.fillStyle = color;
             ctx.fillRect(col, clampedTop, 1, clampedBottom - clampedTop);
+
+            // Wall-mounted button: small, unique shape embedded on the wall.
+            if (isButtonWallHit(hit) && hit.wallX > 0.34 && hit.wallX < 0.66) {
+                const mountHeight = Math.max(2, Math.floor(wallHeight * 0.2));
+                const mountTop = Math.floor(horizonY - mountHeight * 0.5);
+                const mountBottom = Math.min(INTERNAL_HEIGHT, mountTop + mountHeight);
+
+                // Backplate
+                ctx.fillStyle = 'rgba(40, 16, 8, 0.95)';
+                ctx.fillRect(col, Math.max(0, mountTop), 1, Math.max(0, mountBottom - Math.max(0, mountTop)));
+
+                // Orange core
+                const coreHeight = Math.max(1, Math.floor(mountHeight * 0.55));
+                const coreTop = Math.floor(horizonY - coreHeight * 0.5);
+                ctx.fillStyle = '#ff7a1a';
+                ctx.fillRect(col, Math.max(0, coreTop), 1, Math.max(0, coreHeight));
+
+                // Bright center segment for distinct "button" read.
+                const centerTop = Math.floor(horizonY - 1);
+                ctx.fillStyle = '#ffe3c4';
+                ctx.fillRect(col, Math.max(0, centerTop), 1, 2);
+            }
         }
 
         // ── Draw Floor (below wall) ─────────────────────────────

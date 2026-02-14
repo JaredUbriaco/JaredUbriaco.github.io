@@ -7,7 +7,7 @@
  */
 
 import { INTERNAL_WIDTH, INTERNAL_HEIGHT, TILE } from './config.js';
-import { grid, getMapWidth, getMapHeight, getRoomId, doors, ROOMS } from './map.js';
+import { grid, getMapWidth, getMapHeight, getRoomId, doors, ROOMS, INTERACTABLE_POSITIONS } from './map.js';
 
 // ── Minimap Config ──────────────────────────────────────────────────
 const MINIMAP_SIZE = 120;       // canvas pixel size
@@ -132,6 +132,19 @@ export function drawMinimap(state) {
         mctx.beginPath();
         mctx.arc(sx, sy, radius, 0, Math.PI * 2);
         mctx.fill();
+    }
+
+    // Draw wall button marker (small orange square + center dot).
+    const button = INTERACTABLE_POSITIONS.area1Button;
+    if (button) {
+        const bx = (button.x - camX) * MINIMAP_SCALE;
+        const by = (button.y - camY) * MINIMAP_SCALE;
+        if (bx >= 0 && bx <= MINIMAP_SIZE && by >= 0 && by <= MINIMAP_SIZE) {
+            mctx.fillStyle = '#ff7a1a';
+            mctx.fillRect(bx - 1.5, by - 1.5, 3, 3);
+            mctx.fillStyle = '#ffd9b3';
+            mctx.fillRect(bx - 0.5, by - 0.5, 1, 1);
+        }
     }
 
     // Draw player (bright cyan dot with direction line)

@@ -2,6 +2,7 @@
  * objectives.js — Shared objective/checklist tracking
  *
  * One source of truth for goal progress used by both HUD and AI.
+ * Formal AI tasks: preconditions (when the task can be attempted) and postconditions (when it is done).
  */
 
 import { TILE } from './config.js';
@@ -9,8 +10,87 @@ import { ROOM_BOUNDS, getTile } from './map.js';
 
 const COMBAT_ROOMS = ['area1', 'a2r1', 'a2r2', 'a2r3', 'a2r4', 'a2r5', 'area3'];
 
+const TASK_ORDER = [
+    'pickup-handgun',
+    'use-button',
+    'clear-rooms',
+    'use-doors-progress',
+    'pickup-shotgun',
+    'pickup-voidbeam',
+    'voidbeam-light-zone',
+];
+
+/**
+ * Formal AI task: preconditions (can attempt) and postcondition (done).
+ * @typedef {{ id: string, label: string, preconditions: (s: object) => boolean, postcondition: (s: object) => boolean }} AITask
+ */
+
 function getObjectiveValue(state, id) {
     return state.objectives.items.find(item => item.id === id) || null;
+}
+
+function isDone(state, id) {
+    const item = getObjectiveValue(state, id);
+    return item ? item.done : false;
+}
+
+export const AI_TASKS = [
+    {
+        id: 'pickup-handgun',
+        label: 'Pick up Handgun',
+        preconditions: () => true,
+        postcondition: (s) => s.player.weapons && s.player.weapons.includes('HANDGUN'),
+    },
+    {
+        id: 'use-button',
+        label: 'Use Button',
+        preconditions: (s) => isDone(s, 'pickup-handgun'),
+        postcondition: (s) => !!s.flags.buttonPressed,
+    },
+    {
+        id: 'clear-rooms',
+        label: 'Clear combat rooms',
+        preconditions: (s) => isDone(s, 'use-button'),
+        postcondition: (s) => {
+            if (!s.entities) return false;
+            return COMBAT_ROOMS.every(roomId => !s.entities.some(e => e.roomId === roomId && e.hp > 0));
+        },
+    },
+    {
+        id: 'use-doors-progress',
+        label: 'Use doors to progress',
+        preconditions: () => true,
+        postcondition: (s) => (s.hud && s.hud.currentRoomId === 'area3') || !!s.flags.bossActive,
+    },
+    {
+        id: 'pickup-shotgun',
+        label: 'Pick up Shotgun',
+        preconditions: (s) => isDone(s, 'use-button'),
+        postcondition: (s) => s.player.weapons && s.player.weapons.includes('SHOTGUN'),
+    },
+    {
+        id: 'pickup-voidbeam',
+        label: 'Pick up Void Beam',
+        preconditions: (s) => isDone(s, 'use-doors-progress') || (s.hud && s.hud.currentRoomId === 'area3'),
+        postcondition: (s) => s.player.weapons && s.player.weapons.includes('VOIDBEAM'),
+    },
+    {
+        id: 'voidbeam-light-zone',
+        label: 'Use Void Beam from light zone',
+        preconditions: (s) => s.player.weapons && s.player.weapons.includes('VOIDBEAM'),
+        postcondition: (s) => !!s.flags.voidBeamLightZoneUsed,
+    },
+];
+
+/** Returns unmet tasks in order whose preconditions are satisfied (for planner). */
+export function getOrderedUnmetTasks(state) {
+    return AI_TASKS.filter(t => !t.postcondition(state) && t.preconditions(state));
+}
+
+/** Returns the current objective task (first unmet in TASK_ORDER, preconditions met). */
+export function getCurrentObjectiveTask(state) {
+    const unmet = getOrderedUnmetTasks(state);
+    return unmet.length > 0 ? unmet[0] : null;
 }
 
 function isRoomCleared(state, roomId) {
@@ -54,7 +134,20 @@ export function createObjectivesState() {
             { id: 'voidbeam-light-zone', label: 'Use Void Beam from light zone', done: false },
         ],
         completedOnce: {},
+        /** Failure reasons for planner: { [taskId]: { reason: string, at: number } } */
+        failureReasons: {},
     };
+}
+
+/** Record a failure reason for a task (used by AI planner). */
+export function recordTaskFailure(state, taskId, reason) {
+    if (!state.objectives) return;
+    state.objectives.failureReasons[taskId] = { reason, at: state.time?.now ?? Date.now() / 1000 };
+}
+
+/** Get last failure for a task, if any. */
+export function getTaskFailure(state, taskId) {
+    return state.objectives?.failureReasons?.[taskId] ?? null;
 }
 
 export function updateObjectives(state) {
@@ -88,6 +181,9 @@ export function updateObjectives(state) {
         if (item.done && !state.objectives.completedOnce[item.id]) {
             state.objectives.completedOnce[item.id] = true;
             state.hud.messages.push({ text: `OBJECTIVE COMPLETE: ${item.label.toUpperCase()}`, timer: 2 });
+        }
+        if (item.done && state.objectives.failureReasons && state.objectives.failureReasons[item.id]) {
+            delete state.objectives.failureReasons[item.id];
         }
     }
 }

@@ -111,7 +111,8 @@ fillRect(A1_X + 9, A1_Y + 9, 2, 2, TILE.WALL);
 // Button on the far (east) wall — centered vertically
 const BUTTON_X = A1_X + A1_W - 1;
 const BUTTON_Y = A1_Y + Math.floor(A1_H / 2);
-placeTile(BUTTON_X, BUTTON_Y, TILE.BUTTON);
+// Keep the wall intact; the button is rendered/handled as a wall-mounted interactable.
+placeTile(BUTTON_X, BUTTON_Y, TILE.WALL);
 
 // Locked gate (button-locked door) on south wall of Area 1 → Area 2
 // This door will be used to enter Area 2 (expanded in tasks5)
@@ -332,6 +333,26 @@ function registerDoor(x, y, locked, lockType) {
         lockType: lockType, // 'button' | 'key' | null
         openProgress: 0,
     };
+}
+
+/** Reset all doors to closed (for regression tests). */
+export function resetDoors() {
+    for (const key of Object.keys(doors)) {
+        const d = doors[key];
+        d.open = false;
+        d.opening = false;
+        d.openProgress = 0;
+    }
+}
+
+/** Open all doors (for regression tests). */
+export function openAllDoors() {
+    for (const key of Object.keys(doors)) {
+        const d = doors[key];
+        d.open = true;
+        d.opening = false;
+        d.openProgress = 1;
+    }
 }
 
 // Register doors

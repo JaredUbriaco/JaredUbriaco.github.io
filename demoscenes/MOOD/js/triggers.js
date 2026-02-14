@@ -10,7 +10,7 @@ import {
     INTERACTION_RANGE, INTERACTION_ANGLE,
 } from './config.js';
 
-import { getTile, isSolid, doors, grid } from './map.js';
+import { getTile, isSolid, doors, grid, INTERACTABLE_POSITIONS } from './map.js';
 import { consumeInteract } from './input.js';
 
 let noInteractHintCooldown = 0;
@@ -97,22 +97,10 @@ function findNearbyDoor(px, py, pAngle, angleLimit = INTERACTION_ANGLE) {
 // ── Find Button ─────────────────────────────────────────────────────
 
 function findNearbyButton(px, py, pAngle, angleLimit = INTERACTION_ANGLE) {
-    const searchRange = Math.ceil(INTERACTION_RANGE) + 1;
-    const playerCol = Math.floor(px);
-    const playerRow = Math.floor(py);
-
-    for (let dy = -searchRange; dy <= searchRange; dy++) {
-        for (let dx = -searchRange; dx <= searchRange; dx++) {
-            const col = playerCol + dx;
-            const row = playerRow + dy;
-            if (getTile(col, row) !== TILE.BUTTON) continue;
-
-            const tileCX = col + 0.5;
-            const tileCY = row + 0.5;
-            if (isInInteractionRangeWithAngle(px, py, pAngle, tileCX, tileCY, angleLimit)) {
-                return { col, row };
-            }
-        }
+    const button = INTERACTABLE_POSITIONS.area1Button;
+    if (!button) return null;
+    if (isInInteractionRangeWithAngle(px, py, pAngle, button.x, button.y, angleLimit)) {
+        return { x: button.x, y: button.y };
     }
     return null;
 }
