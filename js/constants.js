@@ -15,6 +15,15 @@ const CONFIG = {
     },
 };
 
+// Build order thresholds (SC2-style)
+const BUILD_ORDER = {
+    SUPPLY_DEPOT_WHEN_SUPPLY_USED: 10,   // Build depot when supply at/near cap (10-12 used)
+    SCVS_MIN_FOR_DEPOT: 10,              // Minimum SCVs before depot allowed
+    SCVS_TARGET_BEFORE_DEPOT: 12,        // Aim for 10-12 SCVs before first depot
+    SCVS_BEFORE_BARRACKS: 13,            // 13-15 SCVs before barracks
+    SCVS_IDEAL_SINGLE_BASE: 22,          // 16 minerals + 6 gas per base (gas not implemented)
+};
+
 const ENTITY_TYPES = {
     COMMAND_CENTER: 'command_center',
     BARRACKS: 'barracks',
@@ -40,7 +49,7 @@ const BUILDINGS = {
     [ENTITY_TYPES.BARRACKS]: {
         name: 'Barracks',
         cost: { minerals: 150 },
-        buildTime: 60,
+        buildTime: 46,
         width: 2,
         height: 2,
         requires: ENTITY_TYPES.SUPPLY_DEPOT,
@@ -68,11 +77,11 @@ const UNITS = {
     [ENTITY_TYPES.SCV]: {
         name: 'SCV',
         cost: { minerals: 50 },
-        buildTime: 12,
+        buildTime: 22,
         supplyCost: 1,
-        mineralsPerTrip: 5,
-        miningTimeSeconds: 8,
-        moveSpeed: 1.8,
+        mineralsPerTrip: 10,
+        miningTimeSeconds: 2.5,
+        moveSpeed: 8,
     },
     [ENTITY_TYPES.MARINE]: {
         name: 'Marine',

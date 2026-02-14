@@ -41,7 +41,7 @@ function findNearest(entity, entities, type) {
 }
 
 function findNearestForFaction(scv, entities) {
-    const maxDist = scv.faction === 'enemy' ? 15 : Infinity;
+        const maxDist = scv.faction === 'enemy' ? 30 : Infinity;
     let nearest = null;
     let nearestDist = Infinity;
     for (const e of entities) {
@@ -233,7 +233,7 @@ function runEnemyAIDecision(entities, enemyMap) {
     if (!hasSupplySpace({ supply, supplyCap }, 1) && !hasDepot) return;
     if (scvCount < 8 && canAfford(enemyMap, { minerals: 50 }) && hasSupplySpace({ supply, supplyCap }, 1)) {
         enemyCc.buildQueue = enemyCc.buildQueue || [];
-        enemyCc.buildQueue.push({ type: ENTITY_TYPES.SCV, buildTime: 12, cost: { minerals: 50 }, supplyCost: 1 });
+        enemyCc.buildQueue.push({ type: ENTITY_TYPES.SCV, buildTime: UNITS[ENTITY_TYPES.SCV].buildTime, cost: { minerals: 50 }, supplyCost: 1 });
         enemyMap.minerals -= 50;
         enemyMap.supply = (enemyMap.supply || 0) + 1;
     }
@@ -242,18 +242,28 @@ function runEnemyAIDecision(entities, enemyMap) {
 function runAIDecision(entities, map) {
     const scvCount = entities.filter(e => e.type === ENTITY_TYPES.SCV).length;
     const hasDepot = entities.some(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT);
+    const depotComplete = entities.some(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT && (e.buildProgress === undefined || e.buildProgress >= 100));
     const hasBarracks = entities.some(e => e.type === ENTITY_TYPES.BARRACKS);
+    const supply = map.supply || 0;
+    const supplyBlocked = !hasSupplySpace(map, 1);
 
     for (const e of entities) {
         if (e.type !== ENTITY_TYPES.COMMAND_CENTER && e.type !== ENTITY_TYPES.BARRACKS) continue;
         if (e.buildQueue && e.buildQueue.length > 0) continue;
 
         if (e.type === ENTITY_TYPES.COMMAND_CENTER) {
-            if (!hasSupplySpace(map, 1) && !hasDepot && canAfford(map, { minerals: 100 })) {
+            // Supply Depot: when at/near supply cap (10-12 used) with 10+ SCVs, or supply blocked
+            const nearSupplyCap = supply >= (BUILD_ORDER.SUPPLY_DEPOT_WHEN_SUPPLY_USED || 10);
+            const enoughScvsForDepot = scvCount >= (BUILD_ORDER.SCVS_MIN_FOR_DEPOT || 10);
+            if (!hasDepot && canAfford(map, { minerals: 100 }) &&
+                (supplyBlocked || (nearSupplyCap && enoughScvsForDepot))) {
                 tryBuild(entities, map, ENTITY_TYPES.SUPPLY_DEPOT);
                 continue;
             }
-            if (scvCount < 15 && canAfford(map, UNITS[ENTITY_TYPES.SCV].cost) && hasSupplySpace(map, 1)) {
+            // SCVs: aim for 10-12 before depot, 13-15 before barracks, then up to ideal saturation
+            const scvTarget = !depotComplete ? (BUILD_ORDER.SCVS_TARGET_BEFORE_DEPOT || 12) :
+                !hasBarracks ? (BUILD_ORDER.SCVS_BEFORE_BARRACKS || 15) : (BUILD_ORDER.SCVS_IDEAL_SINGLE_BASE || 22);
+            if (scvCount < scvTarget && canAfford(map, UNITS[ENTITY_TYPES.SCV].cost) && hasSupplySpace(map, 1)) {
                 e.buildQueue.push({
                     type: ENTITY_TYPES.SCV,
                     buildTime: UNITS[ENTITY_TYPES.SCV].buildTime,
@@ -263,11 +273,14 @@ function runAIDecision(entities, map) {
                 map.minerals -= UNITS[ENTITY_TYPES.SCV].cost.minerals;
                 continue;
             }
-            if (!hasBarracks && hasDepot && canAfford(map, { minerals: 150 })) {
+            // Barracks: after depot complete, 13+ SCVs, 150 minerals
+            const enoughScvsForBarracks = scvCount >= (BUILD_ORDER.SCVS_BEFORE_BARRACKS || 13);
+            if (!hasBarracks && depotComplete && enoughScvsForBarracks && canAfford(map, { minerals: 150 })) {
                 tryBuild(entities, map, ENTITY_TYPES.BARRACKS);
             }
         }
         if (e.type === ENTITY_TYPES.BARRACKS) {
+            // Marines: start immediately after Barracks finishes (no buildQueue = ready to produce)
             const marineCount = entities.filter(x => x.type === ENTITY_TYPES.MARINE).length;
             if (marineCount < 10 && canAfford(map, UNITS[ENTITY_TYPES.MARINE].cost) && hasSupplySpace(map, 1)) {
                 e.buildQueue.push({
