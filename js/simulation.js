@@ -40,6 +40,22 @@ function findNearest(entity, entities, type) {
     return nearest;
 }
 
+function findNearestForFaction(scv, entities) {
+    const maxDist = scv.faction === 'enemy' ? 15 : Infinity;
+    let nearest = null;
+    let nearestDist = Infinity;
+    for (const e of entities) {
+        if (e.type !== ENTITY_TYPES.MINERAL_PATCH) continue;
+        if (!e.minerals || e.minerals < (UNITS[ENTITY_TYPES.SCV].mineralsPerTrip || 5)) continue;
+        const d = distance(scv.gridX, scv.gridY, e.gridX, e.gridY);
+        if (d < nearestDist && d < maxDist) {
+            nearestDist = d;
+            nearest = e;
+        }
+    }
+    return nearest;
+}
+
 function findNearestBuilding(entity, entities, producesType) {
     for (const e of entities) {
         if (e.type !== ENTITY_TYPES.COMMAND_CENTER && e.type !== ENTITY_TYPES.BARRACKS) continue;
@@ -60,9 +76,10 @@ function hasSupplySpace(map, supplyCost) {
     return map.supply + supplyCost <= map.supplyCap;
 }
 
-function updateEntity(entity, entities, map, deltaTime) {
+function updateEntity(entity, entities, map, deltaTime, enemyMap) {
+    const resourceMap = entity.faction === 'enemy' ? (enemyMap || map) : map;
     if (entity.type === ENTITY_TYPES.SCV) {
-        updateSCV(entity, entities, map, deltaTime);
+        updateSCV(entity, entities, resourceMap, deltaTime);
         return;
     }
     if (entity.type === ENTITY_TYPES.MARINE) {
@@ -71,7 +88,8 @@ function updateEntity(entity, entities, map, deltaTime) {
     }
     if (entity.type === ENTITY_TYPES.COMMAND_CENTER || entity.type === ENTITY_TYPES.BARRACKS ||
         entity.type === ENTITY_TYPES.SUPPLY_DEPOT || entity.type === ENTITY_TYPES.REFINERY) {
-        updateBuilding(entity, entities, map, deltaTime);
+        const bmap = entity.faction === 'enemy' ? (enemyMap || map) : map;
+        updateBuilding(entity, entities, bmap, deltaTime);
     }
 }
 
@@ -81,7 +99,7 @@ function updateSCV(scv, entities, map, deltaTime) {
     const speed = scv.moveSpeed * dtSec;
 
     if (scv.state === 'returning') {
-        const cc = entities.find(e => e.type === ENTITY_TYPES.COMMAND_CENTER);
+        const cc = entities.find(e => e.type === ENTITY_TYPES.COMMAND_CENTER && (e.faction || 'player') === (scv.faction || 'player'));
         if (!cc) {
             scv.state = 'idle';
             return;
@@ -91,7 +109,7 @@ function updateSCV(scv, entities, map, deltaTime) {
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < 0.4) {
             map.minerals += def.mineralsPerTrip;
-            map.mineralsCollected += def.mineralsPerTrip;
+            if (map.mineralsCollected !== undefined) map.mineralsCollected += def.mineralsPerTrip;
             scv.state = 'idle';
             scv.targetId = null;
             return;
@@ -150,8 +168,8 @@ function updateSCV(scv, entities, map, deltaTime) {
         return;
     }
 
-    if (scv.state === 'idle') {
-        const patch = findNearest(scv, entities, ENTITY_TYPES.MINERAL_PATCH);
+    if (scv.state === 'idle' || scv.state === 'moving') {
+        const patch = findNearestForFaction(scv, entities);
         if (patch) {
             scv.targetId = patch.id;
             scv.state = 'moving_to_mineral';
@@ -196,8 +214,28 @@ function updateBuilding(building, entities, map, deltaTime) {
         const spawnX = building.gridX + building.width;
         const spawnY = building.gridY + Math.floor(building.height / 2);
         const unit = createEntity(queued.type, spawnX, spawnY);
+        if (building.faction) unit.faction = building.faction;
         entities.push(unit);
-        map.supply += queued.supplyCost || 0;
+        map.supply = (map.supply || 0) + (queued.supplyCost || 0);
+    }
+}
+
+function runEnemyAIDecision(entities, enemyMap) {
+    const enemyEntities = entities.filter(e => e.faction === 'enemy');
+    const enemyCc = enemyEntities.find(e => e.type === ENTITY_TYPES.COMMAND_CENTER);
+    if (!enemyCc || !enemyMap) return;
+    const scvCount = enemyEntities.filter(e => e.type === ENTITY_TYPES.SCV).length;
+    const hasDepot = enemyEntities.some(e => e.type === ENTITY_TYPES.SUPPLY_DEPOT);
+    const supplyCap = enemyMap.supplyCap || 17;
+    const supply = enemyMap.supply || 0;
+
+    if (enemyCc.buildQueue && enemyCc.buildQueue.length > 0) return;
+    if (!hasSupplySpace({ supply, supplyCap }, 1) && !hasDepot) return;
+    if (scvCount < 8 && canAfford(enemyMap, { minerals: 50 }) && hasSupplySpace({ supply, supplyCap }, 1)) {
+        enemyCc.buildQueue = enemyCc.buildQueue || [];
+        enemyCc.buildQueue.push({ type: ENTITY_TYPES.SCV, buildTime: 12, cost: { minerals: 50 }, supplyCost: 1 });
+        enemyMap.minerals -= 50;
+        enemyMap.supply = (enemyMap.supply || 0) + 1;
     }
 }
 

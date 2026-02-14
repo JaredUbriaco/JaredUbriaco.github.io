@@ -22,6 +22,9 @@ let canvas, ctx;
 const camera = window.camera = {
     x: 0,
     y: 0,
+    zoom: 1,
+    minZoom: 0.4,
+    maxZoom: 2.5,
 };
 
 function initRender(c) {
@@ -31,10 +34,20 @@ function initRender(c) {
 
 function getRenderOffset() {
     const baseScreen = worldToScreen(CONFIG.MAP_COLS / 2 - 0.5, CONFIG.MAP_ROWS / 2 - 0.5);
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
     return {
-        x: (canvas.width / 2) + camera.x - baseScreen.x,
-        y: (canvas.height / 2) + camera.y - baseScreen.y,
+        x: cx - baseScreen.x,
+        y: cy - baseScreen.y,
     };
+}
+
+function canvasToDrawingCoords(canvasX, canvasY) {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const dx = (canvasX - cx - camera.x) / camera.zoom + cx;
+    const dy = (canvasY - cy - camera.y) / camera.zoom + cy;
+    return { x: dx, y: dy };
 }
 
 function drawIsometricTile(gridX, gridY, color, ox, oy) {
@@ -139,6 +152,37 @@ function drawSCV(entity, ox, oy) {
     }
 }
 
+function drawEnemyEntity(entity, ox, oy) {
+    const def = BUILDINGS[entity.type];
+    if (def) {
+        const w = (def.width || 1) * (CONFIG.TILE_WIDTH / 2);
+        const h = (def.height || 1) * (CONFIG.TILE_HEIGHT / 2);
+        const { x, y } = worldToScreen(entity.gridX + (def.width || 1) / 2, entity.gridY + (def.height || 1) / 2);
+        const sx = x + ox - w / 2;
+        const sy = y + oy - h / 2;
+        ctx.fillStyle = '#dc2626';
+        ctx.fillRect(sx, sy, w, h);
+        ctx.strokeStyle = '#b91c1c';
+        ctx.strokeRect(sx, sy, w, h);
+    } else if (entity.type === ENTITY_TYPES.SCV) {
+        const { x, y } = worldToScreen(entity.gridX, entity.gridY);
+        const sx = x + ox;
+        const sy = y + oy;
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+        ctx.fill();
+    } else if (entity.type === ENTITY_TYPES.MARINE) {
+        const { x, y } = worldToScreen(entity.gridX, entity.gridY);
+        const sx = x + ox;
+        const sy = y + oy;
+        ctx.fillStyle = '#dc2626';
+        ctx.fillRect(sx - 4, sy - 3, 8, 6);
+        ctx.fillStyle = '#b91c1c';
+        ctx.fillRect(sx + 4, sy - 1, 6, 2);
+    }
+}
+
 function drawMarine(entity, ox, oy) {
     const { x, y } = worldToScreen(entity.gridX, entity.gridY);
     const sx = x + ox;
@@ -176,31 +220,26 @@ function isExplored(explored, gridX, gridY, width, height) {
 function render(state, selectionBox) {
     if (!canvas || !ctx) return;
     const { entities, explored } = state;
-    const ox = getRenderOffset().x;
-    const oy = getRenderOffset().y;
+    const offset = getRenderOffset();
+    const ox = offset.x;
+    const oy = offset.y;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (selectionBox && selectionBox.start && selectionBox.current) {
-        const x = Math.min(selectionBox.start.x, selectionBox.current.x);
-        const y = Math.min(selectionBox.start.y, selectionBox.current.y);
-        const w = Math.abs(selectionBox.current.x - selectionBox.start.x);
-        const h = Math.abs(selectionBox.current.y - selectionBox.start.y);
-        ctx.strokeStyle = 'rgba(88, 166, 255, 0.9)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(x, y, w, h);
-        ctx.fillStyle = 'rgba(88, 166, 255, 0.1)';
-        ctx.fillRect(x, y, w, h);
-        ctx.setLineDash([]);
-    }
+    ctx.save();
+    ctx.translate(cx + camera.x, cy + camera.y);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-cx, -cy);
 
     for (let row = 0; row < CONFIG.MAP_ROWS; row++) {
         for (let col = 0; col < CONFIG.MAP_COLS; col++) {
             if (explored && !explored[row][col]) {
                 drawIsometricTile(col, row, 'rgba(0,0,0,0.92)', ox, oy);
             } else {
-                drawIsometricTile(col, row, COLORS.grid, ox, oy);
+                const variant = (col + row) % 3 === 0 ? 'rgba(88, 166, 255, 0.06)' : (col + row) % 3 === 1 ? 'rgba(88, 166, 255, 0.1)' : COLORS.grid;
+                drawIsometricTile(col, row, variant, ox, oy);
             }
         }
     }
@@ -222,7 +261,9 @@ function render(state, selectionBox) {
         .forEach(e => drawMineralPatch(e, ox, oy));
 
     drawOrder.forEach(e => {
-        if (e.type === ENTITY_TYPES.COMMAND_CENTER || e.type === ENTITY_TYPES.BARRACKS ||
+        if (e.faction === 'enemy') {
+            drawEnemyEntity(e, ox, oy);
+        } else if (e.type === ENTITY_TYPES.COMMAND_CENTER || e.type === ENTITY_TYPES.BARRACKS ||
             e.type === ENTITY_TYPES.SUPPLY_DEPOT || e.type === ENTITY_TYPES.REFINERY) {
             drawBuilding(e, ox, oy);
         } else if (e.type === ENTITY_TYPES.SCV) {
@@ -231,4 +272,20 @@ function render(state, selectionBox) {
             drawMarine(e, ox, oy);
         }
     });
+
+    ctx.restore();
+
+    if (selectionBox && selectionBox.start && selectionBox.current) {
+        const x = Math.min(selectionBox.start.x, selectionBox.current.x);
+        const y = Math.min(selectionBox.start.y, selectionBox.current.y);
+        const w = Math.abs(selectionBox.current.x - selectionBox.start.x);
+        const h = Math.abs(selectionBox.current.y - selectionBox.start.y);
+        ctx.strokeStyle = 'rgba(88, 166, 255, 0.9)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(x, y, w, h);
+        ctx.fillStyle = 'rgba(88, 166, 255, 0.1)';
+        ctx.fillRect(x, y, w, h);
+        ctx.setLineDash([]);
+    }
 }

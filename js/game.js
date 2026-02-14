@@ -21,8 +21,11 @@
     }
 
     function getEntityAtScreen(canvasX, canvasY) {
+        const draw = canvasToDrawingCoords(canvasX, canvasY);
+        const drawX = draw.x;
+        const drawY = draw.y;
         const offset = getRenderOffset();
-        const worldClick = screenToWorld(canvasX - offset.x, canvasY - offset.y, 0, 0);
+        const worldClick = screenToWorld(drawX - offset.x, drawY - offset.y, 0, 0);
         const clickGridX = worldClick.gridX;
         const clickGridY = worldClick.gridY;
         const SELECT_RADIUS = 14;
@@ -35,6 +38,7 @@
                 return bd - ad;
             });
         for (const e of selectable) {
+            if (e.faction === 'enemy') continue;
             if (e.width && e.height) {
                 if (clickGridX >= e.gridX && clickGridX < e.gridX + e.width &&
                     clickGridY >= e.gridY && clickGridY < e.gridY + e.height) {
@@ -44,7 +48,7 @@
                 const screenPos = worldToScreen(e.gridX, e.gridY);
                 const unitSx = screenPos.x + offset.x;
                 const unitSy = screenPos.y + offset.y;
-                const dist = Math.sqrt((canvasX - unitSx) ** 2 + (canvasY - unitSy) ** 2);
+                const dist = Math.sqrt((drawX - unitSx) ** 2 + (drawY - unitSy) ** 2);
                 if (dist <= SELECT_RADIUS) return e;
             }
         }
@@ -53,7 +57,7 @@
                 const screenPos = worldToScreen(e.gridX, e.gridY);
                 const sx = screenPos.x + offset.x + CONFIG.TILE_WIDTH / 4;
                 const sy = screenPos.y + offset.y + CONFIG.TILE_HEIGHT / 4;
-                const dist = Math.sqrt((canvasX - sx) ** 2 + (canvasY - sy) ** 2);
+                const dist = Math.sqrt((drawX - sx) ** 2 + (drawY - sy) ** 2);
                 if (dist <= SELECT_RADIUS) return e;
             }
         }
@@ -61,13 +65,15 @@
     }
 
     function getUnitsInBox(sx1, sy1, sx2, sy2) {
+        const d1 = canvasToDrawingCoords(sx1, sy1);
+        const d2 = canvasToDrawingCoords(sx2, sy2);
         const offset = getRenderOffset();
         const units = state.entities.filter(e =>
-            e.type === ENTITY_TYPES.SCV || e.type === ENTITY_TYPES.MARINE);
-        const minX = Math.min(sx1, sx2);
-        const maxX = Math.max(sx1, sx2);
-        const minY = Math.min(sy1, sy2);
-        const maxY = Math.max(sy1, sy2);
+            (e.type === ENTITY_TYPES.SCV || e.type === ENTITY_TYPES.MARINE) && !e.faction);
+        const minX = Math.min(d1.x, d2.x);
+        const maxX = Math.max(d1.x, d2.x);
+        const minY = Math.min(d1.y, d2.y);
+        const maxY = Math.max(d1.y, d2.y);
         return units.filter(e => {
             const screenPos = worldToScreen(e.gridX, e.gridY);
             const ux = screenPos.x + offset.x;
@@ -120,12 +126,13 @@
 
             while (accumulated >= 16) {
                 accumulated -= 16;
-                state.entities.forEach(e => updateEntity(e, state.entities, state.map, 16));
+                state.entities.forEach(e => updateEntity(e, state.entities, state.map, 16, state.enemyMap));
                 updateExplored(state.entities, state.explored);
                 aiCooldown++;
                 if (aiCooldown >= 30) {
                     aiCooldown = 0;
                     runAIDecision(state.entities, state.map);
+                    runEnemyAIDecision(state.entities, state.enemyMap);
                 }
             }
         }
@@ -148,6 +155,7 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
+    if (!state.enemyMap) state.enemyMap = { minerals: 0, supply: 0, supplyCap: 17 };
     if (!state.explored) {
         state.explored = [];
         for (let r = 0; r < CONFIG.MAP_ROWS; r++) {
@@ -166,7 +174,7 @@
         cycleSpeed,
     });
 
-    if (ui) ui.setStatus('Colony operational. Drag to select • Right-click to move • Alt+drag to pan • Slower = more relaxing');
+    if (ui) ui.setStatus('Scroll to zoom • Drag to select • Right-click to move • Alt+drag to pan • Red = enemy colony');
 
     requestAnimationFrame(tick);
 

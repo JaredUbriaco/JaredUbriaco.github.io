@@ -175,6 +175,12 @@ function initUI(game) {
         boxSelectCurrent = null;
     });
 
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        camera.zoom = Math.max(camera.minZoom, Math.min(camera.maxZoom, camera.zoom + delta));
+    }, { passive: false });
+
     canvas.addEventListener('click', (e) => {
         if (!gameInstance || e.button !== 0) return;
         if (lastWasBoxSelect || lastWasPan) {
@@ -203,8 +209,9 @@ function initUI(game) {
         if (!gameInstance || selectedEntities.length === 0) return;
         const pos = getCanvasCoords(e);
         const clickedEntity = gameInstance.getEntityAtScreen(pos.x, pos.y);
+        const draw = canvasToDrawingCoords(pos.x, pos.y);
         const offset = getRenderOffset();
-        const { gridX, gridY } = screenToWorld(pos.x - offset.x, pos.y - offset.y, 0, 0);
+        const { gridX, gridY } = screenToWorld(draw.x - offset.x, draw.y - offset.y, 0, 0);
 
         const movableUnits = selectedEntities.filter(u =>
             u.type === ENTITY_TYPES.SCV || u.type === ENTITY_TYPES.MARINE);

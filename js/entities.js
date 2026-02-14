@@ -71,6 +71,12 @@ function createInitialState() {
         supplyCap: 17,
         mineralsCollected: 0,
     };
+    const enemyMap = {
+        minerals: 30,
+        vespene: 0,
+        supply: 2,
+        supplyCap: 17,
+    };
 
     // Spawn Command Center at center
     const ccX = Math.floor(CONFIG.MAP_COLS / 2) - 1;
@@ -108,5 +114,27 @@ function createInitialState() {
             }
         }
     }
-    return { entities, map, explored };
+
+    const enemyX = Math.min(ccX + 28, CONFIG.MAP_COLS - 6);
+    const enemyY = Math.min(ccY + 25, CONFIG.MAP_ROWS - 5);
+    const eCc = createEntity(ENTITY_TYPES.COMMAND_CENTER, enemyX, enemyY);
+    eCc.faction = 'enemy';
+    entities.push(eCc);
+    for (let i = 0; i < 2; i++) {
+        const eScv = createEntity(ENTITY_TYPES.SCV, enemyX + 4 + i, enemyY);
+        eScv.faction = 'enemy';
+        eScv.targetId = null;
+        entities.push(eScv);
+    }
+    const enemyMinerals = [
+        [enemyX - 5, enemyY - 4], [enemyX + 6, enemyY - 5], [enemyX - 4, enemyY + 6],
+        [enemyX + 10, enemyY + 4], [enemyX - 8, enemyY - 2],
+    ];
+    enemyMinerals.forEach(([x, y]) => {
+        if (x >= 0 && x < CONFIG.MAP_COLS && y >= 0 && y < CONFIG.MAP_ROWS) {
+            entities.push(createEntity(ENTITY_TYPES.MINERAL_PATCH, x, y));
+        }
+    });
+
+    return { entities, map, enemyMap, explored };
 }
