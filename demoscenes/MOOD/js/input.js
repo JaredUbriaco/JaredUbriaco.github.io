@@ -14,7 +14,8 @@ window.addEventListener('keydown', (e) => {
     keys[e.code] = true;
     resetIdleTimer();
     // Prevent default for game keys to avoid browser shortcuts
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Escape', 'Backquote'].includes(e.code)) {
+    // NEVER preventDefault on Escape — browser needs it to exit pointer lock
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Backquote'].includes(e.code)) {
         e.preventDefault();
     }
 });

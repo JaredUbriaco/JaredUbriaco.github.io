@@ -358,12 +358,21 @@ function pauseGame() {
 function resumeGame() {
     state.flags.paused = false;
     overlayPause.classList.add('hidden');
+    // Re-request pointer lock (must come from a click user gesture)
     input.resumeGame(canvas);
 }
 
+// Resume button — click is a valid user gesture for pointer lock
 btnResume.addEventListener('click', (e) => {
     e.stopPropagation();
     resumeGame();
+});
+
+// Clicking anywhere on the pause overlay also resumes
+overlayPause.addEventListener('click', (e) => {
+    if (e.target === overlayPause) {
+        resumeGame();
+    }
 });
 
 btnQuit.addEventListener('click', (e) => {
@@ -371,23 +380,12 @@ btnQuit.addEventListener('click', (e) => {
     window.location.href = '../';
 });
 
-// Escape key also unpauses if game is paused
-window.addEventListener('keydown', (e) => {
-    if (e.code === 'Escape' && state.flags.paused) {
-        e.preventDefault();
-        resumeGame();
-    }
-});
-
 // ── Game Start ──────────────────────────────────────────────────────
-function startGame() {
+function startGame(fromClick) {
     if (state.flags.started) return;
 
     state.flags.started = true;
     overlayStart.classList.add('hidden');
-
-    // Request pointer lock
-    input.requestLock(canvas);
 
     // Show controls overlay briefly
     overlayControls.classList.remove('hidden');
@@ -404,18 +402,30 @@ function startGame() {
     state.entities = entities.spawnInitialEntities();
     state.projectiles = [];
 
+    // Request pointer lock — must come from a click event to work reliably
+    if (fromClick) {
+        input.requestLock(canvas);
+    }
+
     // Start the loop
     lastTime = performance.now();
     requestAnimationFrame(gameLoop);
 }
 
-// Click to start
-overlayStart.addEventListener('click', startGame);
+// Click to start (click is the only reliable way to get pointer lock)
+overlayStart.addEventListener('click', () => startGame(true));
 
-// Also start on any key (for accessibility)
+// Any key also starts (but won't get pointer lock — click the game area to lock)
 window.addEventListener('keydown', (e) => {
     if (!state.flags.started && e.code !== 'Escape') {
-        startGame();
+        startGame(false);
+    }
+});
+
+// If pointer lock is lost and game isn't paused, clicking canvas re-locks
+canvas.addEventListener('click', () => {
+    if (state.flags.started && !state.flags.paused && !input.isPointerLocked()) {
+        input.requestLock(canvas);
     }
 });
 
