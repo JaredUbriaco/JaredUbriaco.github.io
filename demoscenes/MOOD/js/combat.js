@@ -108,6 +108,10 @@ function damageEntity(entity, damage, state) {
             }
             return;
         }
+
+        if (state.player.currentWeapon === 'VOIDBEAM') {
+            state.flags.voidBeamLightZoneUsed = true;
+        }
     }
 
     entity.hp -= damage;

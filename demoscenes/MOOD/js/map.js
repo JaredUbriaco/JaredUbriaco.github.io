@@ -276,18 +276,23 @@ const A3_W = 16;
 const A3_H = 16;
 fillRect(A3_X, A3_Y, A3_W, A3_H, TILE.EMPTY);
 tagRoom(A3_X, A3_Y, A3_W, A3_H, 'area3');
-// Central light well cluster (boss vulnerability zone)
-fillRect(A3_X + 6, A3_Y + 6, 4, 4, TILE.LIGHT_WELL);
+// Three light well zones (boss vulnerability zones for Void Beam)
+fillRect(A3_X + 1, A3_Y + 1, 3, 3, TILE.LIGHT_WELL);   // north-west
+fillRect(A3_X + 12, A3_Y + 1, 3, 3, TILE.LIGHT_WELL);  // north-east
+fillRect(A3_X + 6, A3_Y + 11, 3, 3, TILE.LIGHT_WELL);  // south-center
 // Perimeter pillars for cover
 fillRect(A3_X + 3, A3_Y + 3, 2, 2, TILE.WALL);
 fillRect(A3_X + 11, A3_Y + 3, 2, 2, TILE.WALL);
 fillRect(A3_X + 3, A3_Y + 11, 2, 2, TILE.WALL);
 fillRect(A3_X + 11, A3_Y + 11, 2, 2, TILE.WALL);
-// Additional light wells at corners (gives player more angles of attack)
-placeTile(A3_X + 1, A3_Y + 1, TILE.LIGHT_WELL);
-placeTile(A3_X + A3_W - 2, A3_Y + 1, TILE.LIGHT_WELL);
-placeTile(A3_X + 1, A3_Y + A3_H - 2, TILE.LIGHT_WELL);
-placeTile(A3_X + A3_W - 2, A3_Y + A3_H - 2, TILE.LIGHT_WELL);
+// Colorful floor pattern in the arena (visual signal + minimap flavor)
+for (let row = A3_Y + 1; row < A3_Y + A3_H - 1; row++) {
+    for (let col = A3_X + 1; col < A3_X + A3_W - 1; col++) {
+        // Keep existing solids/light zones untouched
+        if (grid[row][col] !== TILE.EMPTY) continue;
+        grid[row][col] = ((row + col) % 2 === 0) ? TILE.STAIR : TILE.OUTDOOR;
+    }
+}
 
 // Boss spawn position
 const BOSS_SPAWN = { x: A3_X + A3_W / 2, y: A3_Y + A3_H / 2 };
@@ -403,6 +408,10 @@ export const PICKUP_POSITIONS = {
     handgun: { x: A0_X + A0_W / 2 + 1, y: A0_Y + A0_H / 2 },
     shotgun: { x: A2R4_X + A2R4_W / 2, y: A2R4_Y + A2R4_H / 2 + 1 },
     voidbeam: VOIDBEAM_POS,
+};
+
+export const INTERACTABLE_POSITIONS = {
+    area1Button: { x: BUTTON_X + 0.5, y: BUTTON_Y + 0.5 },
 };
 
 // Enemy spawn positions per room

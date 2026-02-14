@@ -27,10 +27,10 @@ const TILE_COLORS = {
     [TILE.DOOR_LOCKED_BUTTON]: '#a60',
     [TILE.SECRET_WALL]:        '#333',  // same as wall (it's a secret!)
     [TILE.DOOR_LOCKED_KEY]:    '#a0a',
-    [TILE.LIGHT_WELL]:         '#ff0',
-    [TILE.OUTDOOR]:            '#0a0',
-    [TILE.STAIR]:              '#060',
-    [TILE.BUTTON]:             '#ff0',
+    [TILE.LIGHT_WELL]:         '#39e6ff',
+    [TILE.OUTDOOR]:            '#137348',
+    [TILE.STAIR]:              '#7a2bd3',
+    [TILE.BUTTON]:             '#ff6a00',
 };
 
 // ── Draw Crosshair (on main canvas) ─────────────────────────────────

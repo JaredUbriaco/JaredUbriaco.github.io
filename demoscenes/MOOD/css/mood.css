@@ -74,6 +74,29 @@ body {
     letter-spacing: 1px;
 }
 
+#hud-objectives {
+    position: absolute;
+    top: 34px;
+    left: 16px;
+    width: 310px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(0, 229, 255, 0.18);
+    font-size: 11px;
+    line-height: 1.4;
+    color: #d9faff;
+    text-shadow: 0 0 4px rgba(0, 229, 255, 0.3);
+}
+
+#hud-objectives .objective {
+    opacity: 0.9;
+}
+
+#hud-objectives .objective.done {
+    color: #7dffb0;
+    opacity: 1;
+}
+
 #hud-room-label {
     position: absolute;
     top: 12px;

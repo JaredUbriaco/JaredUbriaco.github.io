@@ -12,6 +12,7 @@ import { renderWalls } from './raycaster.js';
 import { renderAll as renderSprites } from './sprites.js';
 import { drawCanvas as drawHud } from './hud.js';
 import { getWeaponBob } from './player.js';
+import { getRoomId } from './map.js';
 
 // ── Hue Rotation State ──────────────────────────────────────────────
 let hueAngle = 0;
@@ -198,6 +199,71 @@ function drawVoidBeam(ctx, phase, showFlash, time) {
     }
 }
 
+function drawBossArenaFloor(ctx, state) {
+    if (getRoomId(state.player.x, state.player.y) !== 'area3') return;
+
+    const pitchShift = state.player.pitch * 16;
+    const topY = Math.floor(INTERNAL_HEIGHT * 0.58 + pitchShift);
+    const bottomY = INTERNAL_HEIGHT;
+    const topInset = 120;
+    const centerX = INTERNAL_WIDTH / 2;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(topInset, topY);
+    ctx.lineTo(INTERNAL_WIDTH - topInset, topY);
+    ctx.lineTo(INTERNAL_WIDTH, bottomY);
+    ctx.lineTo(0, bottomY);
+    ctx.closePath();
+    ctx.clip();
+
+    // Colored tile strips that widen with depth.
+    const rows = 14;
+    for (let r = 0; r < rows; r++) {
+        const t0 = r / rows;
+        const t1 = (r + 1) / rows;
+        const y0 = topY + (bottomY - topY) * t0;
+        const y1 = topY + (bottomY - topY) * t1;
+        const halfW0 = topInset + ((INTERNAL_WIDTH / 2) - topInset) * t0;
+        const halfW1 = topInset + ((INTERNAL_WIDTH / 2) - topInset) * t1;
+
+        const cols = 12;
+        for (let c = 0; c < cols; c++) {
+            const x0 = centerX - halfW0 + (2 * halfW0 * c) / cols;
+            const x1 = centerX - halfW0 + (2 * halfW0 * (c + 1)) / cols;
+            const x2 = centerX - halfW1 + (2 * halfW1 * (c + 1)) / cols;
+            const x3 = centerX - halfW1 + (2 * halfW1 * c) / cols;
+
+            const hue = (state.time.now * 0.02 + c * 18 + r * 7) % 360;
+            const alpha = ((r + c) % 2 === 0) ? 0.18 : 0.11;
+            ctx.fillStyle = `hsla(${hue}, 80%, 45%, ${alpha})`;
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y0);
+            ctx.lineTo(x2, y1);
+            ctx.lineTo(x3, y1);
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
+    // Three "light" pads that mirror the new minimap zones.
+    const pads = [
+        { x: centerX - 82, y: topY + 36 },
+        { x: centerX + 82, y: topY + 36 },
+        { x: centerX, y: topY + 96 },
+    ];
+    for (const pad of pads) {
+        ctx.fillStyle = 'rgba(80, 235, 255, 0.28)';
+        ctx.fillRect(pad.x - 18, pad.y - 10, 36, 20);
+        ctx.strokeStyle = 'rgba(160, 250, 255, 0.8)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(pad.x - 18, pad.y - 10, 36, 20);
+    }
+
+    ctx.restore();
+}
+
 // ── Main Draw Function ──────────────────────────────────────────────
 
 /**
@@ -223,6 +289,9 @@ export function draw(state, ctx) {
 
     // ── 2. Raycaster: Walls + Floor + Ceiling ───────────────────
     renderWalls(ctx, player, time.now);
+
+    // ── 2.5 Boss Arena Floor Overlay ─────────────────────────────
+    drawBossArenaFloor(ctx, state);
 
     // ── 3. Sprites (entities + projectiles + pickups) ───────────
     renderSprites(ctx, state);

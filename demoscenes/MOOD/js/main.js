@@ -22,6 +22,7 @@ import * as combat from './combat.js';
 import * as projectiles from './projectiles.js';
 import * as ai from './ai.js';
 import * as audio from './audio.js';
+import * as objectives from './objectives.js';
 
 // ── DOM References ──────────────────────────────────────────────────
 const canvas = document.getElementById('mood-canvas');
@@ -35,6 +36,7 @@ const debugOverlay = document.getElementById('debug-overlay');
 
 // HUD DOM elements
 const hudKillCounter = document.getElementById('hud-kill-counter');
+const hudObjectives = document.getElementById('hud-objectives');
 const hudRoomLabel = document.getElementById('hud-room-label');
 const hudWeapon = document.getElementById('hud-weapon');
 const hudAiIndicator = document.getElementById('hud-ai-indicator');
@@ -108,7 +110,9 @@ const state = {
         area1Cleared: false,
         secretFound: false,
         lightWellHintShown: false,
+        voidBeamLightZoneUsed: false,
     },
+    objectives: objectives.createObjectivesState(),
     effects: {
         screenShake: 0,
         distortion: 0,
@@ -155,6 +159,7 @@ function updateDebug(dt) {
 // ── HUD DOM Updates ─────────────────────────────────────────────────
 function updateHudDom() {
     hudKillCounter.textContent = `${state.hud.killCount}/${state.hud.totalEnemies} SPIRITS`;
+    hudObjectives.innerHTML = objectives.renderObjectivesHtml(state);
     hudWeapon.textContent = state.player.currentWeapon;
 
     // AI indicator
@@ -252,6 +257,7 @@ function gameLoop(timestamp) {
     }
 
     // ── Step 3: AI update ───────────────────────────────────────
+    objectives.updateObjectives(state);
     state.ai.active = input.isAIActive();
     ai.update(state);
 

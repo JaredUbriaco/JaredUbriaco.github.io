@@ -12,8 +12,12 @@
  * 4. Otherwise, wander toward unexplored rooms via waypoints.
  */
 
-import { isSolid, getTile, getRoomId, ROOMS, ROOM_BOUNDS, doors } from './map.js';
+import {
+    isSolid, getTile, getRoomId, ROOM_BOUNDS, doors,
+    PICKUP_POSITIONS, INTERACTABLE_POSITIONS,
+} from './map.js';
 import { TILE, INTERACTION_RANGE, PLAYER_SPEED } from './config.js';
+import { getObjectiveHintsForAI } from './objectives.js';
 
 // ── Waypoint Graph (room centers) ───────────────────────────────────
 // Each node is a room center; edges are direct connections via hallways.
@@ -207,6 +211,64 @@ function chooseExplorationTarget(state) {
     return null;
 }
 
+function getCurrentObjectiveId(state) {
+    const firstIncomplete = state.objectives.items.find(item => !item.done);
+    return firstIncomplete ? firstIncomplete.id : null;
+}
+
+function steerTowardPoint(ai, player, tx, ty) {
+    const targetAngle = angleTo(player.x, player.y, tx, ty);
+    const angleDiff = normalizeAngle(targetAngle - player.angle);
+    ai.lookDX = angleDiff * 7;
+
+    const dist = distanceTo(player.x, player.y, tx, ty);
+    if (dist > 0.6) {
+        if (!isPathBlocked(player.x, player.y, player.angle, 1.0)) {
+            ai.moveForward = true;
+        } else {
+            const leftClear = !isPathBlocked(player.x, player.y, player.angle - Math.PI / 2, 1.0);
+            const rightClear = !isPathBlocked(player.x, player.y, player.angle + Math.PI / 2, 1.0);
+            if (leftClear) ai.strafeLeft = true;
+            else if (rightClear) ai.strafeRight = true;
+            else ai.moveBack = true;
+        }
+    }
+
+    return { dist, angleDiff };
+}
+
+function navigateToRoom(state, targetRoomId) {
+    const currentRoom = getRoomId(state.player.x, state.player.y) || 'area0';
+    if (currentRoom === targetRoomId) return true;
+    const path = findPath(currentRoom, targetRoomId);
+    if (!path || path.length < 2) return false;
+    aiPath = path;
+    aiPathIndex = 1;
+    aiTarget = targetRoomId;
+    return true;
+}
+
+function getNearestArea3LightWell(state) {
+    const bounds = ROOM_BOUNDS.area3;
+    if (!bounds) return null;
+
+    let best = null;
+    let bestDist = Infinity;
+    for (let row = bounds.y; row < bounds.y + bounds.h; row++) {
+        for (let col = bounds.x; col < bounds.x + bounds.w; col++) {
+            if (getTile(col, row) !== TILE.LIGHT_WELL) continue;
+            const x = col + 0.5;
+            const y = row + 0.5;
+            const dist = distanceTo(state.player.x, state.player.y, x, y);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = { x, y, dist };
+            }
+        }
+    }
+    return best;
+}
+
 // ── Main AI Update ──────────────────────────────────────────────────
 
 /**
@@ -281,6 +343,69 @@ export function update(state) {
         return;
     }
 
+    const objectiveHints = getObjectiveHintsForAI(state);
+    const objectiveId = getCurrentObjectiveId(state);
+
+    // ── Objective Stage Steering (shared with checklist) ─────────
+    if (objectiveId === 'pickup-handgun') {
+        const pos = PICKUP_POSITIONS.handgun;
+        if (pos) {
+            steerTowardPoint(ai, player, pos.x, pos.y);
+            return;
+        }
+    }
+
+    if (objectiveId === 'use-button') {
+        const area1Alive = state.entities.some(e => e.roomId === 'area1' && e.hp > 0);
+        if (area1Alive) {
+            const area1 = ROOM_BOUNDS.area1;
+            if (area1) {
+                const tx = area1.x + area1.w / 2;
+                const ty = area1.y + area1.h / 2;
+                steerTowardPoint(ai, player, tx, ty);
+            } else {
+                navigateToRoom(state, 'area1');
+            }
+            return;
+        }
+
+        const button = INTERACTABLE_POSITIONS.area1Button;
+        if (button) {
+            const { dist, angleDiff } = steerTowardPoint(ai, player, button.x, button.y);
+            if (dist <= INTERACTION_RANGE && Math.abs(angleDiff) < 0.4 && aiInteractCooldown <= 0) {
+                ai.interact = true;
+                aiInteractCooldown = 1;
+            }
+            return;
+        }
+    }
+
+    if (objectiveId === 'use-doors-progress' && objectiveHints.needsDoorsProgress) {
+        if (!navigateToRoom(state, 'area3')) {
+            const area3 = ROOM_BOUNDS.area3;
+            if (area3) {
+                steerTowardPoint(ai, player, area3.x + area3.w / 2, area3.y + area3.h / 2);
+                return;
+            }
+        }
+    }
+
+    if (objectiveId === 'pickup-shotgun') {
+        const pos = PICKUP_POSITIONS.shotgun;
+        if (pos) {
+            steerTowardPoint(ai, player, pos.x, pos.y);
+            return;
+        }
+    }
+
+    if (objectiveId === 'pickup-voidbeam') {
+        const pos = PICKUP_POSITIONS.voidbeam;
+        if (pos) {
+            steerTowardPoint(ai, player, pos.x, pos.y);
+            return;
+        }
+    }
+
     // ── Priority 1: Fight visible enemies ───────────────────────
     const enemyInfo = findNearestEnemy(state);
     if (enemyInfo) {
@@ -298,6 +423,22 @@ export function update(state) {
                 const slotMap = { 'FIST': 1, 'HANDGUN': 2, 'SHOTGUN': 3, 'VOIDBEAM': 4 };
                 ai.weaponSlot = slotMap[bestWeapon] || null;
                 aiWeaponSwitchCooldown = 1;
+            }
+        }
+
+        // During boss phase objective, make AI use Void Beam from a light well.
+        if (objectiveId === 'voidbeam-light-zone' && enemyInfo.entity.type === 'BOSS') {
+            const standingTile = getTile(Math.floor(player.x), Math.floor(player.y));
+            const onLightWell = standingTile === TILE.LIGHT_WELL;
+
+            if (!onLightWell) {
+                const nearestLight = getNearestArea3LightWell(state);
+                if (nearestLight) {
+                    steerTowardPoint(ai, player, nearestLight.x, nearestLight.y);
+                    return;
+                }
+            } else if (player.currentWeapon !== 'VOIDBEAM' && player.weapons.includes('VOIDBEAM')) {
+                ai.weaponSlot = 4;
             }
         }
 

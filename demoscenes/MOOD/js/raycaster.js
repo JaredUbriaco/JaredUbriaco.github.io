@@ -43,9 +43,9 @@ function getWallColor(tileType, hitSide, distance) {
             l = 45;
             break;
         case TILE.BUTTON:
-            h = 50;   // golden yellow
-            s = 80;
-            l = 55;
+            h = 20;   // orange button plate
+            s = 90;
+            l = 52;
             break;
         default:
             h = 260;
@@ -235,6 +235,11 @@ export function renderWalls(ctx, player, timeNow) {
         // Door animation: partially open doors have reduced height
         if (hit.doorProgress !== undefined && hit.doorProgress > 0) {
             wallHeight *= (1 - hit.doorProgress);
+        }
+
+        // Buttons are intentionally shorter than doors/walls.
+        if (hit.wallType === TILE.BUTTON) {
+            wallHeight *= 0.28;
         }
 
         // Wall strip screen positions
