@@ -71,8 +71,8 @@ export function update(state) {
     // Normalize angle to [0, 2π)
     p.angle = ((p.angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
 
-    // Pitch (vertical look)
-    p.pitch += lookDY * MOUSE_SENSITIVITY;
+    // Pitch (vertical look) — negate so mouse-up = look-up
+    p.pitch -= lookDY * MOUSE_SENSITIVITY;
     p.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, p.pitch));
 
     // ── WASD Movement ───────────────────────────────────────────
@@ -165,7 +165,7 @@ function updateWeaponState(p, state, dt) {
     }
 
     if (slotRequest > 0 && ws.phase === 'idle') {
-        const slotMap = { 1: 'FIST', 2: 'HANDGUN', 3: 'SHOTGUN' };
+        const slotMap = { 1: 'FIST', 2: 'HANDGUN', 3: 'SHOTGUN', 4: 'VOIDBEAM' };
         const targetWeapon = slotMap[slotRequest];
         if (targetWeapon && targetWeapon !== p.currentWeapon && p.weapons.includes(targetWeapon)) {
             ws.phase = 'swapping';

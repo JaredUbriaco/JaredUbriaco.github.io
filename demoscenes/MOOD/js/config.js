@@ -39,7 +39,7 @@ export const WEAPONS = {
     FIST: {
         name: 'FIST',
         damage: 2,
-        range: 1.5,
+        range: 2.5,
         fireRate: 333,        // ms between full fire cycles
         type: 'melee',
         windupMs: 80,

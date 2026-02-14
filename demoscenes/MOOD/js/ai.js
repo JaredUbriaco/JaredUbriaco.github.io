@@ -99,7 +99,38 @@ function normalizeAngle(angle) {
     return angle;
 }
 
-/** Find the nearest alive entity visible from the player position */
+/**
+ * Simple line-of-sight check: step along the ray from (x1,y1) to (x2,y2).
+ * Returns true if no solid tile blocks the path.
+ */
+function hasLineOfSight(x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 0.5) return true;
+
+    const steps = Math.ceil(dist * 3); // check every ~0.33 tiles
+    for (let i = 1; i < steps; i++) {
+        const t = i / steps;
+        const cx = x1 + dx * t;
+        const cy = y1 + dy * t;
+        if (isSolid(cx, cy)) return false;
+    }
+    return true;
+}
+
+/**
+ * Check if moving forward from current position is blocked by a wall.
+ * Looks a short distance ahead along the given angle.
+ */
+function isPathBlocked(x, y, angle, distance) {
+    const checkDist = Math.min(distance, 1.5);
+    const cx = x + Math.cos(angle) * checkDist;
+    const cy = y + Math.sin(angle) * checkDist;
+    return isSolid(cx, cy);
+}
+
+/** Find the nearest alive entity visible from the player position (with LOS check) */
 function findNearestEnemy(state) {
     const { player, entities } = state;
     let best = null;
@@ -108,9 +139,12 @@ function findNearestEnemy(state) {
     for (const e of entities) {
         if (e.aggroState === 'dead' || e.hp <= 0) continue;
         const dist = distanceTo(player.x, player.y, e.x, e.y);
-        if (dist < 20 && dist < bestDist) {
-            bestDist = dist;
-            best = e;
+        if (dist < 15 && dist < bestDist) {
+            // Line-of-sight check — only engage enemies we can actually see
+            if (hasLineOfSight(player.x, player.y, e.x, e.y)) {
+                bestDist = dist;
+                best = e;
+            }
         }
     }
     return best ? { entity: best, distance: bestDist } : null;
@@ -212,22 +246,38 @@ export function update(state) {
     const currentRoom = getRoomId(player.x, player.y);
     if (currentRoom) aiVisitedRooms.add(currentRoom);
 
-    // Stuck detection
+    // Stuck detection — more aggressive (1.5s threshold, smarter recovery)
     const distMoved = distanceTo(player.x, player.y, aiLastPos.x, aiLastPos.y);
-    if (distMoved < 0.05 * dt) {
+    if (distMoved < 0.02) {
         aiStuckTimer += dt;
     } else {
-        aiStuckTimer = 0;
+        aiStuckTimer = Math.max(0, aiStuckTimer - dt * 2); // decay faster when moving
     }
     aiLastPos.x = player.x;
     aiLastPos.y = player.y;
 
-    // If stuck for 3+ seconds, try random strafe
-    if (aiStuckTimer > 3) {
-        ai.strafeLeft = Math.random() > 0.5;
-        ai.strafeRight = !ai.strafeLeft;
-        ai.moveForward = true;
+    // If stuck for 1.5+ seconds, do a smart recovery
+    if (aiStuckTimer > 1.5) {
+        // Turn away from whatever we're stuck on, then strafe
+        const forwardBlocked = isPathBlocked(player.x, player.y, player.angle, 1.0);
+        const leftBlocked = isPathBlocked(player.x, player.y, player.angle - Math.PI / 2, 1.0);
+        const rightBlocked = isPathBlocked(player.x, player.y, player.angle + Math.PI / 2, 1.0);
+
+        if (forwardBlocked && !rightBlocked) {
+            ai.lookDX = 3; // turn right
+            ai.strafeRight = true;
+        } else if (forwardBlocked && !leftBlocked) {
+            ai.lookDX = -3; // turn left
+            ai.strafeLeft = true;
+        } else {
+            // Both sides blocked — turn around
+            ai.lookDX = 6;
+            ai.moveBack = true;
+        }
         aiStuckTimer = 0;
+        // Clear current path to force re-pathfinding
+        aiPath = [];
+        aiPathIndex = 0;
         return;
     }
 
@@ -245,7 +295,7 @@ export function update(state) {
         if (aiWeaponSwitchCooldown <= 0) {
             const bestWeapon = chooseBestWeapon(state, distance);
             if (bestWeapon !== player.currentWeapon) {
-                const slotMap = { 'FIST': 1, 'HANDGUN': 2, 'SHOTGUN': 3, 'VOIDBEAM': 3 };
+                const slotMap = { 'FIST': 1, 'HANDGUN': 2, 'SHOTGUN': 3, 'VOIDBEAM': 4 };
                 ai.weaponSlot = slotMap[bestWeapon] || null;
                 aiWeaponSwitchCooldown = 1;
             }
@@ -257,17 +307,33 @@ export function update(state) {
             aiFireCooldown = 0.3;
         }
 
-        // Movement: close in or maintain distance
+        // Movement: close in or maintain distance, with wall awareness
+        const angleToEnemy = angleTo(player.x, player.y, entity.x, entity.y);
         if (distance > 3) {
-            ai.moveForward = true;
+            // Check if forward path toward enemy is clear
+            if (!isPathBlocked(player.x, player.y, angleToEnemy, 1.5)) {
+                ai.moveForward = true;
+            } else {
+                // Path blocked — try strafing around the obstacle
+                const leftClear = !isPathBlocked(player.x, player.y, angleToEnemy - Math.PI / 3, 1.5);
+                const rightClear = !isPathBlocked(player.x, player.y, angleToEnemy + Math.PI / 3, 1.5);
+                if (leftClear) ai.strafeLeft = true;
+                else if (rightClear) ai.strafeRight = true;
+                else ai.moveBack = true; // fully blocked, back up
+            }
         } else if (distance < 1.5) {
             ai.moveBack = true;
         }
 
         // Strafe to dodge projectiles
         if (state.projectiles.length > 0) {
-            ai.strafeLeft = Math.sin(state.time.now * 0.003) > 0;
-            ai.strafeRight = !ai.strafeLeft;
+            const leftClear = !isPathBlocked(player.x, player.y, player.angle - Math.PI / 2, 1.0);
+            const rightClear = !isPathBlocked(player.x, player.y, player.angle + Math.PI / 2, 1.0);
+            if (Math.sin(state.time.now * 0.003) > 0 && leftClear) {
+                ai.strafeLeft = true;
+            } else if (rightClear) {
+                ai.strafeRight = true;
+            }
         }
 
         return;
@@ -338,8 +404,33 @@ export function update(state) {
     const angleDiff = normalizeAngle(targetAngle - player.angle);
     ai.lookDX = angleDiff * 6;
 
-    // Move forward when roughly facing
+    // Move forward when roughly facing — but check for walls first
     if (Math.abs(angleDiff) < 0.5) {
-        ai.moveForward = true;
+        if (!isPathBlocked(player.x, player.y, player.angle, 1.0)) {
+            ai.moveForward = true;
+        } else {
+            // Wall ahead — try to strafe around it
+            const leftClear = !isPathBlocked(player.x, player.y, player.angle - Math.PI / 2, 1.0);
+            const rightClear = !isPathBlocked(player.x, player.y, player.angle + Math.PI / 2, 1.0);
+            if (leftClear) {
+                ai.strafeLeft = true;
+                ai.moveForward = true;
+            } else if (rightClear) {
+                ai.strafeRight = true;
+                ai.moveForward = true;
+            }
+            // If both blocked, stuck timer will handle it
+        }
+    }
+
+    // Also try to interact with doors in our path
+    if (aiInteractCooldown <= 0) {
+        const lookX = player.x + Math.cos(player.angle) * 1.5;
+        const lookY = player.y + Math.sin(player.angle) * 1.5;
+        const tileAhead = getTile(lookX, lookY);
+        if (tileAhead === TILE.DOOR || tileAhead === TILE.DOOR_LOCKED_BUTTON || tileAhead === TILE.DOOR_LOCKED_KEY) {
+            ai.interact = true;
+            aiInteractCooldown = 1;
+        }
     }
 }

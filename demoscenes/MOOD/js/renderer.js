@@ -163,15 +163,16 @@ function drawVoidBeam(ctx, phase, showFlash, time) {
     ctx.arc(0, -15, orbRadius * 0.5, 0, Math.PI * 2);
     ctx.fill();
 
-    // Beam line when firing
+    // Beam line when firing (from orb up to crosshair area)
     if (showFlash) {
+        const beamEndY = -(INTERNAL_HEIGHT - 40 - INTERNAL_HEIGHT / 2 + 15); // weapon pos to screen center
         const beamWidth = 3;
         ctx.strokeStyle = '#c060ff';
         ctx.lineWidth = beamWidth + 2;
         ctx.globalAlpha = 0.4;
         ctx.beginPath();
         ctx.moveTo(0, -15);
-        ctx.lineTo(0, -INTERNAL_HEIGHT);
+        ctx.lineTo(0, beamEndY);
         ctx.stroke();
 
         ctx.strokeStyle = '#e0a0ff';
@@ -179,7 +180,7 @@ function drawVoidBeam(ctx, phase, showFlash, time) {
         ctx.globalAlpha = 0.8;
         ctx.beginPath();
         ctx.moveTo(0, -15);
-        ctx.lineTo(0, -INTERNAL_HEIGHT);
+        ctx.lineTo(0, beamEndY);
         ctx.stroke();
 
         ctx.globalAlpha = 1;

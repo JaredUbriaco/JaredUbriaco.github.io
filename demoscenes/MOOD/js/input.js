@@ -14,7 +14,7 @@ window.addEventListener('keydown', (e) => {
     keys[e.code] = true;
     resetIdleTimer();
     // Prevent default for game keys to avoid browser shortcuts
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'Digit1', 'Digit2', 'Digit3', 'Escape', 'Backquote'].includes(e.code)) {
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Escape', 'Backquote'].includes(e.code)) {
         e.preventDefault();
     }
 });
@@ -40,6 +40,7 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Digit1') weaponSlotPressed = 1;
     if (e.code === 'Digit2') weaponSlotPressed = 2;
     if (e.code === 'Digit3') weaponSlotPressed = 3;
+    if (e.code === 'Digit4') weaponSlotPressed = 4;
 });
 
 /** Returns true once per E press, then resets. */
