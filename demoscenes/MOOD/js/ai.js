@@ -4,6 +4,12 @@
  * Idle ~5s → AI takes over. Like Doom/Quake-era bots: pick one goal,
  * BFS pathfind on the tile grid (go around walls/pillars), steer toward
  * the next path step, interact when in range. One loop: goal → path → steer → act.
+ *
+ * Combat: enemy in LOS → goal = enemy. We turn toward them and may advance until
+ * within combatNoAdvanceDist; then we STOP moving and only turn + fire (avoids
+ * point-blank "dance"). Fire when aim within combatFacingTolerance; if enemy
+ * within combatPointBlankDist we use slightly looser combatFacingToleranceClose
+ * so shots land while they move.
  */
 
 import {
@@ -17,23 +23,31 @@ import { angleTo, distanceTo, normalizeAngle } from './utils.js';
 // ── Tuning ──────────────────────────────────────────────────────────
 // lookDxMax: AI outputs lookDX; player does angle += lookDX * MOUSE_SENSITIVITY (0.002).
 //   Clamp to ±lookDxMax so turn rate ≈ lookDxMax*0.002 rad/frame (e.g. 28 → ~3 rad/s at 60fps).
-// combatFacingTolerance: handgun is hitscan (single ray) — only fire when aimed within this
-//   (rad). 0.2 was too loose (~11°) so we fired at edge of aim and missed; ~0.05 ≈ 3° centers shot.
+// combatFacingTolerance: handgun is hitscan (single ray) — only fire when aimed within this (rad).
+// combatNoAdvanceDist: when enemy is this close (tiles), do NOT move forward — only turn and fire.
+// combatPointBlankDist: when enemy within this (tiles), use combatFacingToleranceClose for fire check.
+//   At point-blank, enemy movement makes tight aim hard; slight relax gets shots off.
 export const AI_TUNING = {
     combatMaxRange: 12,
+    combatNoAdvanceDist: 3,
+    combatPointBlankDist: 2,
     turnGain: 10,
     lookDxMax: 28,
     facingTolerance: 0.2,
     combatFacingTolerance: 0.05,
+    combatFacingToleranceClose: 0.09,
     interactFacingTolerance: INTERACTION_ANGLE,
     pathReachDist: 0.4,
 };
 
 const COMBAT_MAX_RANGE = AI_TUNING.combatMaxRange;
+const COMBAT_NO_ADVANCE_DIST = AI_TUNING.combatNoAdvanceDist;
 const TURN_GAIN = AI_TUNING.turnGain;
 const LOOK_DX_MAX = AI_TUNING.lookDxMax;
 const FACING_TOLERANCE = AI_TUNING.facingTolerance;
 const COMBAT_FACING_TOLERANCE = AI_TUNING.combatFacingTolerance;
+const COMBAT_FACING_TOLERANCE_CLOSE = AI_TUNING.combatFacingToleranceClose;
+const COMBAT_POINT_BLANK_DIST = AI_TUNING.combatPointBlankDist;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
 
 // ── Scripted route (1990s-style: fixed sequence to complete the level) ─
@@ -293,6 +307,16 @@ function steerToward(state, goal) {
     inp.lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, angleDiff * TURN_GAIN));
     inp.lookDY = 0;
 
+    const distToTarget = distanceTo(p.x, p.y, target.x, target.y);
+    const inCombatStandoff = (goal.type === 'enemy' || goal.action === 'fire') && distToTarget <= COMBAT_NO_ADVANCE_DIST;
+
+    if (inCombatStandoff) {
+        inp.moveForward = false;
+        inp.strafeLeft = false;
+        inp.strafeRight = false;
+        return;
+    }
+
     const aligned = Math.abs(angleDiff) <= FACING_TOLERANCE;
     if (aligned && !isPathBlocked(p.x, p.y, p.angle)) {
         inp.moveForward = true;
@@ -327,7 +351,8 @@ function performAction(state, goal) {
     if (goal.action === 'fire') {
         const dist = distanceTo(p.x, p.y, goal.x, goal.y);
         const wantAngle = angleTo(p.x, p.y, goal.x, goal.y);
-        if (dist <= COMBAT_MAX_RANGE && Math.abs(normalizeAngle(wantAngle - p.angle)) <= COMBAT_FACING_TOLERANCE) {
+        const aimTolerance = dist <= COMBAT_POINT_BLANK_DIST ? COMBAT_FACING_TOLERANCE_CLOSE : COMBAT_FACING_TOLERANCE;
+        if (dist <= COMBAT_MAX_RANGE && Math.abs(normalizeAngle(wantAngle - p.angle)) <= aimTolerance) {
             inp.fire = true;
         }
     }
