@@ -1,0 +1,132 @@
+/* Main site - jaredubriaco.github.io */
+
+:root {
+    --bg: #0a0e14;
+    --bg-card: #131921;
+    --bg-card-hover: #1a2230;
+    --border: #2d3748;
+    --accent: #00d4aa;
+    --accent-dim: #00a884;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Share Tech Mono', 'Consolas', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.page {
+    width: 100%;
+    max-width: 720px;
+    padding: 2rem 1.5rem;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.site-header {
+    text-align: center;
+    padding: 3rem 0 2rem;
+}
+
+.site-header h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(1.8rem, 5vw, 2.5rem);
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+}
+
+.tagline {
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    letter-spacing: 0.1em;
+}
+
+.menu {
+    flex: 1;
+}
+
+.menu-section {
+    margin-bottom: 2.5rem;
+}
+
+.menu-section h2 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 400;
+    letter-spacing: 0.25em;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.5rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--text);
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--accent-dim);
+}
+
+.card-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.card-title {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: 0.1em;
+}
+
+.card-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+    text-align: center;
+}
+
+.site-footer {
+    padding: 2rem 0;
+    text-align: center;
+}
+
+.site-footer a {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    text-decoration: none;
+}
+
+.site-footer a:hover {
+    color: var(--accent);
+}

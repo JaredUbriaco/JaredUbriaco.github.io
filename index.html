@@ -3,50 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RTS — jaredubriaco.github.io</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>jaredubriaco.github.io</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 </head>
 <body>
-    <header class="game-header">
-        <div class="logo">RTS</div>
-        <div class="resource-panel">
-            <span class="resource" data-resource="minerals"><span class="resource-icon">◆</span> <span class="resource-value" id="minerals">0</span></span>
-            <span class="resource" data-resource="vespene"><span class="resource-icon">◇</span> <span class="resource-value" id="vespene">0</span></span>
-            <span class="resource" data-resource="supply"><span class="resource-icon">▣</span> <span class="resource-value" id="supply">6/6</span></span>
-        </div>
-        <div class="game-controls">
-            <button id="btn-pause" class="btn-icon" title="Pause">⏸</button>
-            <button id="btn-speed" class="btn-icon" title="Speed">0.5x</button>
-        </div>
-    </header>
+    <div class="page">
+        <header class="site-header">
+            <h1>JARED UBRIACO</h1>
+            <p class="tagline">Games & Demoscenes</p>
+        </header>
 
-    <main class="game-main">
-        <canvas id="game-canvas"></canvas>
-        <div class="selection-panel" id="selection-panel">
-            <div class="panel-title">SELECTION</div>
-            <div id="selection-info">—</div>
-            <div id="build-menu" class="build-menu"></div>
-        </div>
-    </main>
+        <main class="menu">
+            <section class="menu-section">
+                <h2>Games</h2>
+                <nav class="card-grid">
+                    <a href="rts/" class="card">
+                        <span class="card-icon">⚔</span>
+                        <span class="card-title">RTS</span>
+                        <span class="card-desc">Real-time strategy. Eliminate the enemy.</span>
+                    </a>
+                </nav>
+            </section>
+            <section class="menu-section">
+                <h2>Demoscenes</h2>
+                <nav class="card-grid">
+                    <a href="demoscenes/" class="card">
+                        <span class="card-icon">◈</span>
+                        <span class="card-title">Demoscenes</span>
+                        <span class="card-desc">Visual & audio experiments.</span>
+                    </a>
+                </nav>
+            </section>
+        </main>
 
-    <footer class="game-footer">
-        <div class="status-readout">
-            <span id="status-text">Initializing...</span>
-        </div>
-    </footer>
-
-    <div id="win-overlay" class="win-overlay hidden">
-        <div class="win-box">
-            <h2>—</h2>
-            <p>—</p>
-        </div>
+        <footer class="site-footer">
+            <a href="https://github.com/JaredUbriaco">GitHub</a>
+        </footer>
     </div>
-
-    <script src="js/constants.js"></script>
-    <script src="js/entities.js"></script>
-    <script src="js/simulation.js"></script>
-    <script src="js/render.js"></script>
-    <script src="js/ui.js"></script>
-    <script src="js/game.js"></script>
 </body>
 </html>

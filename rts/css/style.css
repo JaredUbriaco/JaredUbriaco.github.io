@@ -30,6 +30,28 @@ body {
     overflow: hidden;
 }
 
+.back-to-menu {
+    position: fixed;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 100;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 1.2rem;
+}
+.back-to-menu:hover {
+    color: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+}
+
 /* Header */
 .game-header {
     display: flex;
