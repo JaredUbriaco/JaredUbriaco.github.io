@@ -73,38 +73,49 @@ function drawIsometricTile(gridX, gridY, color, ox, oy) {
 
 function drawMineralPatch(entity, ox, oy) {
     const { x, y } = worldToScreen(entity.gridX, entity.gridY);
-    const sx = x + ox + CONFIG.TILE_WIDTH / 4;
-    const sy = y + oy + CONFIG.TILE_HEIGHT / 4;
+    const baseX = x + ox + CONFIG.TILE_WIDTH / 4;
+    const baseY = y + oy + CONFIG.TILE_HEIGHT / 4;
     const remaining = entity.minerals / 1500;
     ctx.fillStyle = remaining > 0 ? COLORS.mineral : COLORS.mineralDepleted;
     ctx.strokeStyle = remaining > 0 ? 'rgba(88, 166, 255, 0.4)' : 'rgba(48, 54, 61, 0.3)';
     ctx.globalAlpha = 0.7 + remaining * 0.3;
 
-    const crystals = [
-        { baseX: 0, baseY: 4, tipX: 0, tipY: -6, w: 5 },
-        { baseX: -5, baseY: 2, tipX: 6, tipY: 2, w: 4 },
-        { baseX: 3, baseY: 3, tipX: -4, tipY: 5, w: 4 },
-        { baseX: -3, baseY: -2, tipX: 2, tipY: -5, w: 3 },
-        { baseX: 4, baseY: -1, tipX: -3, tipY: 4, w: 3 },
-        { baseX: -2, baseY: 5, tipX: 3, tipY: -3, w: 3 },
+    const clusterOffsets = [
+        { ox: 0, oy: 0 },
+        { ox: -14, oy: -8 },
+        { ox: 12, oy: -6 },
+        { ox: -8, oy: 10 },
+        { ox: 10, oy: 8 },
     ];
-    crystals.forEach(c => {
-        const bx = sx + c.baseX;
-        const by = sy + c.baseY;
-        const tx = sx + c.tipX;
-        const ty = sy + c.tipY;
-        const hw = c.w / 2;
-        ctx.beginPath();
-        ctx.moveTo(tx, ty);
-        const perpX = -(c.tipY - c.baseY);
-        const perpY = c.tipX - c.baseX;
-        const len = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
-        ctx.lineTo(bx + (perpX / len) * hw, by + (perpY / len) * hw);
-        ctx.lineTo(bx - (perpX / len) * hw, by - (perpY / len) * hw);
-        ctx.closePath();
-        ctx.fill();
-        ctx.lineWidth = 1;
-        ctx.stroke();
+    const crystalSet = [
+        { baseX: 0, baseY: 3, tipX: 0, tipY: -5, w: 4 },
+        { baseX: -4, baseY: 1, tipX: 5, tipY: 1, w: 3 },
+        { baseX: 2, baseY: 2, tipX: -3, tipY: 4, w: 3 },
+        { baseX: -2, baseY: -1, tipX: 1, tipY: -4, w: 2 },
+        { baseX: 3, baseY: 0, tipX: -2, tipY: 3, w: 2 },
+    ];
+
+    clusterOffsets.forEach(clus => {
+        const sx = baseX + clus.ox;
+        const sy = baseY + clus.oy;
+        crystalSet.forEach(c => {
+            const bx = sx + c.baseX;
+            const by = sy + c.baseY;
+            const tx = sx + c.tipX;
+            const ty = sy + c.tipY;
+            const hw = c.w / 2;
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            const perpX = -(c.tipY - c.baseY);
+            const perpY = c.tipX - c.baseX;
+            const len = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
+            ctx.lineTo(bx + (perpX / len) * hw, by + (perpY / len) * hw);
+            ctx.lineTo(bx - (perpX / len) * hw, by - (perpY / len) * hw);
+            ctx.closePath();
+            ctx.fill();
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        });
     });
 
     ctx.globalAlpha = 1;
@@ -151,9 +162,14 @@ function drawSCV(entity, ox, oy) {
     const sx = x + ox;
     const sy = y + oy;
     ctx.fillStyle = entity.state === 'mining' ? '#ca8a04' : COLORS.playerUnit;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 6, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.strokeStyle = entity.state === 'mining' ? '#a16207' : '#ca8a04';
+    ctx.lineWidth = 1;
+    ctx.fillRect(sx - 4, sy - 1, 8, 5);
+    ctx.fillRect(sx - 5, sy - 4, 2, 5);
+    ctx.fillRect(sx + 3, sy - 4, 2, 5);
+    ctx.strokeRect(sx - 4, sy - 1, 8, 5);
+    ctx.strokeRect(sx - 5, sy - 4, 2, 5);
+    ctx.strokeRect(sx + 3, sy - 4, 2, 5);
     if (entity.state === 'mining') {
         const p = (entity.miningProgress || 0) / (UNITS[ENTITY_TYPES.SCV].miningTimeSeconds || 2);
         ctx.fillStyle = COLORS.mineral;
@@ -203,15 +219,18 @@ function drawEnemyEntity(entity, ox, oy) {
         const sx = x + ox;
         const sy = y + oy;
         ctx.fillStyle = COLORS.enemyUnit;
-        ctx.beginPath();
-        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.strokeStyle = '#7f1d1d';
+        ctx.lineWidth = 1;
+        ctx.fillRect(sx - 4, sy - 1, 8, 5);
+        ctx.fillRect(sx - 5, sy - 4, 2, 5);
+        ctx.fillRect(sx + 3, sy - 4, 2, 5);
+        ctx.strokeRect(sx - 4, sy - 1, 8, 5);
+        ctx.strokeRect(sx - 5, sy - 4, 2, 5);
+        ctx.strokeRect(sx + 3, sy - 4, 2, 5);
         if (entity.selected) {
             ctx.strokeStyle = COLORS.enemySelection;
             ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(sx, sy, 8, 0, Math.PI * 2);
-            ctx.stroke();
+            ctx.strokeRect(sx - 6, sy - 5, 14, 10);
         }
     } else if (entity.type === ENTITY_TYPES.MARINE) {
         const { x, y } = worldToScreen(entity.gridX, entity.gridY);
