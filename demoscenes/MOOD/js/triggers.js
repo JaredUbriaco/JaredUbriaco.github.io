@@ -13,6 +13,8 @@ import {
 import { getTile, isSolid, doors, grid } from './map.js';
 import { consumeInteract } from './input.js';
 
+let noInteractHintCooldown = 0;
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 /** Push a timed message to the HUD state. */
@@ -33,6 +35,10 @@ function normalizeAngle(angle) {
  * Check if a target position is within interaction range and facing angle.
  */
 function isInInteractionRange(px, py, pAngle, tx, ty) {
+    return isInInteractionRangeWithAngle(px, py, pAngle, tx, ty, INTERACTION_ANGLE);
+}
+
+function isInInteractionRangeWithAngle(px, py, pAngle, tx, ty, angleLimit) {
     const dx = tx - px;
     const dy = ty - py;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -40,7 +46,7 @@ function isInInteractionRange(px, py, pAngle, tx, ty) {
 
     const angleToTarget = Math.atan2(dy, dx);
     const angleDiff = Math.abs(normalizeAngle(angleToTarget - pAngle));
-    return angleDiff < INTERACTION_ANGLE;
+    return angleDiff < angleLimit;
 }
 
 // ── Find Interactable Doors ─────────────────────────────────────────
@@ -49,7 +55,7 @@ function isInInteractionRange(px, py, pAngle, tx, ty) {
  * Search for interactable door tiles near the player.
  * Returns the door entry if found, or null.
  */
-function findNearbyDoor(px, py, pAngle) {
+function findNearbyDoor(px, py, pAngle, angleLimit = INTERACTION_ANGLE) {
     // Check a grid area around the player
     const searchRange = Math.ceil(INTERACTION_RANGE) + 1;
     const playerCol = Math.floor(px);
@@ -74,7 +80,7 @@ function findNearbyDoor(px, py, pAngle) {
             const tileCY = row + 0.5;
 
             // Check range and facing
-            if (!isInInteractionRange(px, py, pAngle, tileCX, tileCY)) continue;
+            if (!isInInteractionRangeWithAngle(px, py, pAngle, tileCX, tileCY, angleLimit)) continue;
 
             const dist = Math.sqrt((tileCX - px) ** 2 + (tileCY - py) ** 2);
             if (dist < bestDist) {
@@ -90,7 +96,7 @@ function findNearbyDoor(px, py, pAngle) {
 
 // ── Find Button ─────────────────────────────────────────────────────
 
-function findNearbyButton(px, py, pAngle) {
+function findNearbyButton(px, py, pAngle, angleLimit = INTERACTION_ANGLE) {
     const searchRange = Math.ceil(INTERACTION_RANGE) + 1;
     const playerCol = Math.floor(px);
     const playerRow = Math.floor(py);
@@ -103,7 +109,7 @@ function findNearbyButton(px, py, pAngle) {
 
             const tileCX = col + 0.5;
             const tileCY = row + 0.5;
-            if (isInInteractionRange(px, py, pAngle, tileCX, tileCY)) {
+            if (isInInteractionRangeWithAngle(px, py, pAngle, tileCX, tileCY, angleLimit)) {
                 return { col, row };
             }
         }
@@ -113,7 +119,7 @@ function findNearbyButton(px, py, pAngle) {
 
 // ── Find Secret Wall ────────────────────────────────────────────────
 
-function findNearbySecretWall(px, py, pAngle) {
+function findNearbySecretWall(px, py, pAngle, angleLimit = INTERACTION_ANGLE) {
     const searchRange = Math.ceil(INTERACTION_RANGE) + 1;
     const playerCol = Math.floor(px);
     const playerRow = Math.floor(py);
@@ -126,7 +132,7 @@ function findNearbySecretWall(px, py, pAngle) {
 
             const tileCX = col + 0.5;
             const tileCY = row + 0.5;
-            if (isInInteractionRange(px, py, pAngle, tileCX, tileCY)) {
+            if (isInInteractionRangeWithAngle(px, py, pAngle, tileCX, tileCY, angleLimit)) {
                 return { col, row };
             }
         }
@@ -143,6 +149,7 @@ function findNearbySecretWall(px, py, pAngle) {
 export function update(state) {
     const dt = state.time.dt;
     const p = state.player;
+    noInteractHintCooldown = Math.max(0, noInteractHintCooldown - dt);
 
     // ── Animate Opening Doors ───────────────────────────────────
     for (const key in doors) {
@@ -170,10 +177,13 @@ export function update(state) {
 
     if (!wantsInteract) return;
 
+    // AI gets a wider interaction cone; human keeps precision.
+    const angleLimit = state.ai.active ? Math.PI * 0.8 : INTERACTION_ANGLE;
+
     // Priority: Door > Button > Secret Wall
 
     // Try door interaction
-    const doorHit = findNearbyDoor(p.x, p.y, p.angle);
+    const doorHit = findNearbyDoor(p.x, p.y, p.angle, angleLimit);
     if (doorHit && doorHit.door && !doorHit.door.open && !doorHit.door.opening) {
         const { door, tile } = doorHit;
 
@@ -205,7 +215,7 @@ export function update(state) {
     }
 
     // Try button interaction
-    const buttonHit = findNearbyButton(p.x, p.y, p.angle);
+    const buttonHit = findNearbyButton(p.x, p.y, p.angle, angleLimit);
     if (buttonHit && !state.flags.buttonPressed) {
         // Check if all enemies in Area 1 are dead
         const area1Alive = state.entities.filter(e => e.roomId === 'area1' && e.hp > 0).length;
@@ -227,12 +237,17 @@ export function update(state) {
     }
 
     // Try secret wall interaction
-    const secretHit = findNearbySecretWall(p.x, p.y, p.angle);
+    const secretHit = findNearbySecretWall(p.x, p.y, p.angle, angleLimit);
     if (secretHit && !state.flags.secretFound) {
         const { col, row } = secretHit;
         grid[row][col] = TILE.EMPTY; // reveal passage
         state.flags.secretFound = true;
         pushMessage(state, 'YOU FOUND ME', 3);
         return;
+    }
+
+    if (!state.ai.active && noInteractHintCooldown <= 0) {
+        pushMessage(state, 'NO INTERACTION TARGET', 1.1);
+        noInteractHintCooldown = 0.8;
     }
 }

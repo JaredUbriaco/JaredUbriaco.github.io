@@ -29,12 +29,20 @@
         </div>
 
         <!-- Start Overlay -->
-        <div id="overlay-start" class="overlay">CLICK TO BEGIN</div>
+        <div id="overlay-start" class="overlay">
+            <div class="menu-panel">
+                <h1>MOOD</h1>
+                <button id="btn-start">START</button>
+                <button id="btn-start-controls">CONTROLS</button>
+                <button id="btn-start-quit">EXIT</button>
+            </div>
+        </div>
 
         <!-- Pause Overlay -->
         <div id="overlay-pause" class="overlay hidden">
             <h2>PAUSED</h2>
             <button id="btn-resume">RESUME</button>
+            <button id="btn-controls">CONTROLS</button>
             <button id="btn-quit">QUIT</button>
         </div>
 
@@ -48,6 +56,7 @@
                 <span class="key">1</span><span class="key">2</span><span class="key">3</span><span class="key">4</span> Weapons &nbsp;&nbsp;
                 <span class="key">ESC</span> Pause
             </div>
+            <button id="btn-close-controls">CLOSE</button>
         </div>
 
         <!-- Debug Overlay (toggle with backtick) -->

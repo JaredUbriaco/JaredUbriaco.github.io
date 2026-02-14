@@ -87,7 +87,9 @@ fillRect(HALL_01_X, HALL_01_Y, HALL_01_W, HALL_01_H, TILE.EMPTY);
 // Door between Area 0 and hallway
 const DOOR_01_X = HALL_01_X;
 const DOOR_01_Y = HALL_01_Y + 1;   // center of hallway width
-placeTile(DOOR_01_X, DOOR_01_Y, TILE.DOOR);
+for (let y = HALL_01_Y; y < HALL_01_Y + HALL_01_H; y++) {
+    placeTile(DOOR_01_X, y, TILE.DOOR);
+}
 
 // ══════════════════════════════════════════════════════════════════════
 // AREA 1 — THE THRESHOLD (14×14 room, east of hallway)
@@ -115,9 +117,11 @@ placeTile(BUTTON_X, BUTTON_Y, TILE.BUTTON);
 // This door will be used to enter Area 2 (expanded in tasks5)
 const GATE_X = A1_X + Math.floor(A1_W / 2);
 const GATE_Y = A1_Y + A1_H;
-placeTile(GATE_X, GATE_Y, TILE.DOOR_LOCKED_BUTTON);
-// Make the tile below the gate also empty so the door is passable
-placeTile(GATE_X, GATE_Y + 1, TILE.EMPTY);
+for (let x = GATE_X - 1; x <= GATE_X + 1; x++) {
+    placeTile(x, GATE_Y, TILE.DOOR_LOCKED_BUTTON);
+    // Make tiles below the gate also empty so opened doors are passable
+    placeTile(x, GATE_Y + 1, TILE.EMPTY);
+}
 
 // ══════════════════════════════════════════════════════════════════════
 // HALLWAY: Area 1 → Area 2 Room 1 (south from gate)
@@ -150,7 +154,9 @@ const HALL_R1R2_W = 4;
 const HALL_R1R2_H = 3;
 fillRect(HALL_R1R2_X, HALL_R1R2_Y, HALL_R1R2_W, HALL_R1R2_H, TILE.EMPTY);
 // Door between r1 and hallway
-placeTile(A2R1_X, A2R1_Y + 4, TILE.DOOR);
+for (let y = HALL_R1R2_Y; y < HALL_R1R2_Y + HALL_R1R2_H; y++) {
+    placeTile(A2R1_X, y, TILE.DOOR);
+}
 // registerDoor called below after function definition
 
 // ══════════════════════════════════════════════════════════════════════
@@ -176,7 +182,9 @@ const HALL_R1R3_W = 3;
 const HALL_R1R3_H = 4;
 fillRect(HALL_R1R3_X, HALL_R1R3_Y, HALL_R1R3_W, HALL_R1R3_H, TILE.EMPTY);
 // Door
-placeTile(HALL_R1R3_X + 1, A2R1_Y + A2R1_H, TILE.DOOR);
+for (let x = HALL_R1R3_X; x < HALL_R1R3_X + HALL_R1R3_W; x++) {
+    placeTile(x, A2R1_Y + A2R1_H, TILE.DOOR);
+}
 
 // ══════════════════════════════════════════════════════════════════════
 // AREA 2 ROOM 3 — NEXUS (12×12, central hub, south of r1)
@@ -199,7 +207,9 @@ const HALL_R3R4_Y = A2R3_Y + 5;
 const HALL_R3R4_W = 4;
 const HALL_R3R4_H = 3;
 fillRect(HALL_R3R4_X, HALL_R3R4_Y, HALL_R3R4_W, HALL_R3R4_H, TILE.EMPTY);
-placeTile(A2R3_X + A2R3_W, A2R3_Y + 6, TILE.DOOR);
+for (let y = HALL_R3R4_Y; y < HALL_R3R4_Y + HALL_R3R4_H; y++) {
+    placeTile(A2R3_X + A2R3_W, y, TILE.DOOR);
+}
 
 // ══════════════════════════════════════════════════════════════════════
 // AREA 2 ROOM 4 — PRISM CHAMBER (10×10, east of r3)
@@ -222,7 +232,9 @@ const HALL_R3R5_Y = A2R3_Y + A2R3_H;
 const HALL_R3R5_W = 3;
 const HALL_R3R5_H = 4;
 fillRect(HALL_R3R5_X, HALL_R3R5_Y, HALL_R3R5_W, HALL_R3R5_H, TILE.EMPTY);
-placeTile(HALL_R3R5_X + 1, A2R3_Y + A2R3_H, TILE.DOOR);
+for (let x = HALL_R3R5_X; x < HALL_R3R5_X + HALL_R3R5_W; x++) {
+    placeTile(x, A2R3_Y + A2R3_H, TILE.DOOR);
+}
 
 // ══════════════════════════════════════════════════════════════════════
 // AREA 2 ROOM 5 — THE PASSAGE (10×8, south of r3, has key door)
@@ -243,9 +255,11 @@ placeTile(A2R5_X + 4, A2R5_Y + 3, TILE.STAIR);
 // Key door: south wall of a2r5 → boss corridor (Area 3)
 const KEYDOOR_X = A2R5_X + Math.floor(A2R5_W / 2);
 const KEYDOOR_Y = A2R5_Y + A2R5_H;
-placeTile(KEYDOOR_X, KEYDOOR_Y, TILE.DOOR_LOCKED_KEY);
-// Tile below key door also needs to be empty for passage
-placeTile(KEYDOOR_X, KEYDOOR_Y + 1, TILE.EMPTY);
+for (let x = KEYDOOR_X - 1; x <= KEYDOOR_X + 1; x++) {
+    placeTile(x, KEYDOOR_Y, TILE.DOOR_LOCKED_KEY);
+    // Tiles below key door also need to be empty for passage
+    placeTile(x, KEYDOOR_Y + 1, TILE.EMPTY);
+}
 
 // Secret wall hidden in Area 2 (in r2, east wall looks like normal wall)
 placeTile(A2R2_X + A2R2_W - 1, A2R2_Y + 8, TILE.SECRET_WALL);
@@ -321,13 +335,27 @@ function registerDoor(x, y, locked, lockType) {
 }
 
 // Register doors
-registerDoor(DOOR_01_X, DOOR_01_Y, false, null);                           // Area 0 → hallway
-registerDoor(GATE_X, GATE_Y, true, 'button');                               // Area 1 → Area 2 (locked)
-registerDoor(A2R1_X, A2R1_Y + 4, false, null);                             // a2r1 → a2r2 hallway
-registerDoor(HALL_R1R3_X + 1, A2R1_Y + A2R1_H, false, null);              // a2r1 → a2r3 hallway
-registerDoor(A2R3_X + A2R3_W, A2R3_Y + 6, false, null);                   // a2r3 → a2r4 hallway
-registerDoor(HALL_R3R5_X + 1, A2R3_Y + A2R3_H, false, null);              // a2r3 → a2r5 hallway
-registerDoor(KEYDOOR_X, KEYDOOR_Y, true, 'key');                            // a2r5 → Area 3 (key locked)
+for (let y = HALL_01_Y; y < HALL_01_Y + HALL_01_H; y++) {
+    registerDoor(DOOR_01_X, y, false, null);                               // Area 0 → hallway
+}
+for (let x = GATE_X - 1; x <= GATE_X + 1; x++) {
+    registerDoor(x, GATE_Y, true, 'button');                               // Area 1 → Area 2 (locked)
+}
+for (let y = HALL_R1R2_Y; y < HALL_R1R2_Y + HALL_R1R2_H; y++) {
+    registerDoor(A2R1_X, y, false, null);                                  // a2r1 → a2r2 hallway
+}
+for (let x = HALL_R1R3_X; x < HALL_R1R3_X + HALL_R1R3_W; x++) {
+    registerDoor(x, A2R1_Y + A2R1_H, false, null);                         // a2r1 → a2r3 hallway
+}
+for (let y = HALL_R3R4_Y; y < HALL_R3R4_Y + HALL_R3R4_H; y++) {
+    registerDoor(A2R3_X + A2R3_W, y, false, null);                         // a2r3 → a2r4 hallway
+}
+for (let x = HALL_R3R5_X; x < HALL_R3R5_X + HALL_R3R5_W; x++) {
+    registerDoor(x, A2R3_Y + A2R3_H, false, null);                         // a2r3 → a2r5 hallway
+}
+for (let x = KEYDOOR_X - 1; x <= KEYDOOR_X + 1; x++) {
+    registerDoor(x, KEYDOOR_Y, true, 'key');                               // a2r5 → Area 3 (key locked)
+}
 
 // ── Public API ──────────────────────────────────────────────────────
 

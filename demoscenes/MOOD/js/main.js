@@ -30,7 +30,12 @@ const ctx = canvas.getContext('2d');
 const overlayStart = document.getElementById('overlay-start');
 const overlayPause = document.getElementById('overlay-pause');
 const overlayControls = document.getElementById('overlay-controls');
+const btnStart = document.getElementById('btn-start');
+const btnStartControls = document.getElementById('btn-start-controls');
+const btnStartQuit = document.getElementById('btn-start-quit');
 const btnResume = document.getElementById('btn-resume');
+const btnControls = document.getElementById('btn-controls');
+const btnCloseControls = document.getElementById('btn-close-controls');
 const btnQuit = document.getElementById('btn-quit');
 const debugOverlay = document.getElementById('debug-overlay');
 
@@ -219,8 +224,24 @@ export function setRoomLabel(label) {
 
 // ── Controls Overlay ────────────────────────────────────────────────
 let controlsTimer = 3; // show for 3 seconds
+let controlsPinned = false;
+
+function showControls(seconds = 3, pinned = false) {
+    controlsPinned = pinned;
+    controlsTimer = seconds;
+    overlayControls.classList.remove('hidden');
+    overlayControls.classList.remove('fade-out');
+}
+
+function hideControls() {
+    controlsPinned = false;
+    controlsTimer = 0;
+    overlayControls.classList.add('fade-out');
+    setTimeout(() => overlayControls.classList.add('hidden'), 220);
+}
 
 function updateControlsOverlay(dt) {
+    if (controlsPinned) return;
     if (controlsTimer > 0) {
         controlsTimer -= dt;
         if (controlsTimer <= 0) {
@@ -359,6 +380,7 @@ function showVictoryScreen() {
 function pauseGame() {
     state.flags.paused = true;
     overlayPause.classList.remove('hidden');
+    hideControls();
 }
 
 function resumeGame() {
@@ -386,6 +408,16 @@ btnQuit.addEventListener('click', (e) => {
     window.location.href = '../';
 });
 
+btnControls.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showControls(0, true);
+});
+
+btnCloseControls.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hideControls();
+});
+
 // ── Game Start ──────────────────────────────────────────────────────
 function startGame(fromClick) {
     if (state.flags.started) return;
@@ -394,7 +426,7 @@ function startGame(fromClick) {
     overlayStart.classList.add('hidden');
 
     // Show controls overlay briefly
-    overlayControls.classList.remove('hidden');
+    showControls(3, false);
 
     // Initialize player at spawn position (center of Area 0)
     state.player.x = PLAYER_SPAWN.x;
@@ -418,8 +450,20 @@ function startGame(fromClick) {
     requestAnimationFrame(gameLoop);
 }
 
-// Click to start (click is the only reliable way to get pointer lock)
-overlayStart.addEventListener('click', () => startGame(true));
+btnStart.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startGame(true);
+});
+
+btnStartControls.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showControls(0, true);
+});
+
+btnStartQuit.addEventListener('click', (e) => {
+    e.stopPropagation();
+    window.location.href = '../';
+});
 
 // Any key also starts (but won't get pointer lock — click the game area to lock)
 window.addEventListener('keydown', (e) => {

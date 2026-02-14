@@ -33,9 +33,9 @@ function getWallColor(tileType, hitSide, distance) {
         case TILE.DOOR:
         case TILE.DOOR_LOCKED_BUTTON:
         case TILE.DOOR_LOCKED_KEY:
-            h = 180;  // cyan/teal
-            s = 60;
-            l = 50;
+            h = 195;  // steel-blue gate tone
+            s = 35;
+            l = 44;
             break;
         case TILE.SECRET_WALL:
             h = 260;  // identical to regular wall (it's a secret!)
@@ -43,9 +43,9 @@ function getWallColor(tileType, hitSide, distance) {
             l = 45;
             break;
         case TILE.BUTTON:
-            h = 20;   // orange button plate
-            s = 90;
-            l = 52;
+            h = 22;   // orange button plate
+            s = 95;
+            l = 44;
             break;
         default:
             h = 260;
@@ -63,6 +63,10 @@ function getWallColor(tileType, hitSide, distance) {
     l *= fogFactor;
 
     return `hsl(${h}, ${s}%, ${Math.max(2, l)}%)`;
+}
+
+function isDoorTile(tileType) {
+    return tileType === TILE.DOOR || tileType === TILE.DOOR_LOCKED_BUTTON || tileType === TILE.DOOR_LOCKED_KEY;
 }
 
 // ── Ceiling & Floor Colors ──────────────────────────────────────────
@@ -232,6 +236,11 @@ export function renderWalls(ctx, player, timeNow) {
         // Apply breathing modulation
         wallHeight *= breathe;
 
+        // Doors are shorter than full walls so they read as gate panels.
+        if (isDoorTile(hit.wallType)) {
+            wallHeight *= 0.86;
+        }
+
         // Door animation: partially open doors have reduced height
         if (hit.doorProgress !== undefined && hit.doorProgress > 0) {
             wallHeight *= (1 - hit.doorProgress);
@@ -239,7 +248,7 @@ export function renderWalls(ctx, player, timeNow) {
 
         // Buttons are intentionally shorter than doors/walls.
         if (hit.wallType === TILE.BUTTON) {
-            wallHeight *= 0.28;
+            wallHeight *= 0.12;
         }
 
         // Wall strip screen positions
@@ -258,7 +267,14 @@ export function renderWalls(ctx, player, timeNow) {
         const clampedTop = Math.max(0, wallTop);
         const clampedBottom = Math.min(INTERNAL_HEIGHT, wallBottom);
         if (clampedBottom > clampedTop) {
-            ctx.fillStyle = getWallColor(hit.wallType, hit.hitSide, correctedDist);
+            let color = getWallColor(hit.wallType, hit.hitSide, correctedDist);
+            if (isDoorTile(hit.wallType) && hit.wallX !== undefined) {
+                const slat = Math.floor(hit.wallX * 8) % 2;
+                if (slat === 0) {
+                    color = getWallColor(hit.wallType, hit.hitSide, correctedDist * 1.25);
+                }
+            }
+            ctx.fillStyle = color;
             ctx.fillRect(col, clampedTop, 1, clampedBottom - clampedTop);
         }
 

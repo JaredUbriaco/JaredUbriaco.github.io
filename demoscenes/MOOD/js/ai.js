@@ -211,6 +211,27 @@ function chooseExplorationTarget(state) {
     return null;
 }
 
+function findNearbyClosedDoorForAI(state) {
+    const px = state.player.x;
+    const py = state.player.y;
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const key in doors) {
+        const door = doors[key];
+        if (!door || door.open || door.opening) continue;
+        const dx = door.x + 0.5 - px;
+        const dy = door.y + 0.5 - py;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > INTERACTION_RANGE + 0.5) continue;
+        if (dist < bestDist) {
+            bestDist = dist;
+            best = door;
+        }
+    }
+    return best;
+}
+
 function getCurrentObjectiveId(state) {
     const firstIncomplete = state.objectives.items.find(item => !item.done);
     return firstIncomplete ? firstIncomplete.id : null;
@@ -372,7 +393,7 @@ export function update(state) {
         const button = INTERACTABLE_POSITIONS.area1Button;
         if (button) {
             const { dist, angleDiff } = steerTowardPoint(ai, player, button.x, button.y);
-            if (dist <= INTERACTION_RANGE && Math.abs(angleDiff) < 0.4 && aiInteractCooldown <= 0) {
+            if (dist <= INTERACTION_RANGE && Math.abs(angleDiff) < 0.9 && aiInteractCooldown <= 0) {
                 ai.interact = true;
                 aiInteractCooldown = 1;
             }
@@ -493,19 +514,14 @@ export function update(state) {
 
     // ── Priority 3: Interact with nearby doors ──────────────────
     if (aiInteractCooldown <= 0) {
-        // Check if facing a door within interaction range
-        const lookX = player.x + Math.cos(player.angle) * 1.5;
-        const lookY = player.y + Math.sin(player.angle) * 1.5;
-        const tileAhead = getTile(lookX, lookY);
-
-        if (tileAhead === TILE.DOOR || tileAhead === TILE.DOOR_LOCKED_BUTTON || tileAhead === TILE.DOOR_LOCKED_KEY) {
-            const doorKey = `${Math.floor(lookX)},${Math.floor(lookY)}`;
-            const door = doors[doorKey];
-            if (door && !door.open && !door.opening) {
-                ai.interact = true;
-                aiInteractCooldown = 1;
-                return;
-            }
+        const nearbyDoor = findNearbyClosedDoorForAI(state);
+        if (nearbyDoor) {
+            const doorAngle = angleTo(player.x, player.y, nearbyDoor.x + 0.5, nearbyDoor.y + 0.5);
+            const doorDiff = normalizeAngle(doorAngle - player.angle);
+            ai.lookDX = doorDiff * 8;
+            ai.interact = true;
+            aiInteractCooldown = 0.8;
+            return;
         }
     }
 
@@ -566,12 +582,10 @@ export function update(state) {
 
     // Also try to interact with doors in our path
     if (aiInteractCooldown <= 0) {
-        const lookX = player.x + Math.cos(player.angle) * 1.5;
-        const lookY = player.y + Math.sin(player.angle) * 1.5;
-        const tileAhead = getTile(lookX, lookY);
-        if (tileAhead === TILE.DOOR || tileAhead === TILE.DOOR_LOCKED_BUTTON || tileAhead === TILE.DOOR_LOCKED_KEY) {
+        const nearbyDoor = findNearbyClosedDoorForAI(state);
+        if (nearbyDoor) {
             ai.interact = true;
-            aiInteractCooldown = 1;
+            aiInteractCooldown = 0.8;
         }
     }
 }
