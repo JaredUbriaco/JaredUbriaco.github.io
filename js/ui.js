@@ -51,7 +51,12 @@ function initUI(game) {
         const buildings = selectedEntities.filter(e =>
             BUILDINGS[e.type]);
 
-        if (units.length === selectedEntities.length && units.length > 1) {
+        if (first.faction === 'enemy') {
+            let name = first.type === ENTITY_TYPES.SCV || first.type === ENTITY_TYPES.MARINE
+                ? UNITS[first.type].name : BUILDINGS[first.type] ? BUILDINGS[first.type].name
+                : first.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            info.textContent = `Enemy ${name}`;
+        } else if (units.length === selectedEntities.length && units.length > 1) {
             const scvCount = units.filter(u => u.type === ENTITY_TYPES.SCV).length;
             const marineCount = units.filter(u => u.type === ENTITY_TYPES.MARINE).length;
             const parts = [];
@@ -67,7 +72,15 @@ function initUI(game) {
         }
 
         buildMenu.innerHTML = '';
-        if (buildings.length === 1 && buildings[0].buildProgress >= 100) {
+        if (first.faction === 'enemy') {
+            const hint = document.createElement('div');
+            hint.className = 'panel-title';
+            hint.style.marginTop = '0.5rem';
+            hint.textContent = 'View only — cannot control';
+            hint.style.color = 'var(--text-muted)';
+            hint.style.fontSize = '0.7rem';
+            buildMenu.appendChild(hint);
+        } else if (buildings.length === 1 && buildings[0].buildProgress >= 100 && !buildings[0].faction) {
             const def = BUILDINGS[buildings[0].type];
             const map = gameInstance ? gameInstance.state.map : null;
 
@@ -110,7 +123,7 @@ function initUI(game) {
                     buildMenu.appendChild(btn);
                 });
             }
-        } else if (units.length > 0) {
+        } else if (units.length > 0 && !first.faction) {
             const hint = document.createElement('div');
             hint.className = 'panel-title';
             hint.style.marginTop = '0.5rem';
@@ -214,7 +227,7 @@ function initUI(game) {
         const { gridX, gridY } = screenToWorld(draw.x - offset.x, draw.y - offset.y, 0, 0);
 
         const movableUnits = selectedEntities.filter(u =>
-            u.type === ENTITY_TYPES.SCV || u.type === ENTITY_TYPES.MARINE);
+            (u.type === ENTITY_TYPES.SCV || u.type === ENTITY_TYPES.MARINE) && !u.faction);
 
         if (clickedEntity && clickedEntity.type === ENTITY_TYPES.MINERAL_PATCH &&
             clickedEntity.minerals >= (UNITS[ENTITY_TYPES.SCV].mineralsPerTrip || 5)) {

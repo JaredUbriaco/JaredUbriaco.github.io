@@ -7,13 +7,15 @@ const COLORS = {
     mineral: '#58a6ff',
     mineralDepleted: '#30363d',
     vespene: '#3fb950',
-    commandCenter: '#8b949e',
-    commandCenterAccent: '#58a6ff',
-    barracks: '#6e7681',
-    supplyDepot: '#484f58',
-    scv: '#d29922',
-    marine: '#a371f7',
+    playerUnit: '#eab308',
+    playerBase: '#eab308',
+    playerBorder: '#58a6ff',
+    barracks: '#ca8a04',
+    supplyDepot: '#a16207',
     selection: 'rgba(88, 166, 255, 0.6)',
+    enemyUnit: '#b91c1c',
+    enemyBase: '#991b1b',
+    enemySelection: 'rgba(244, 114, 182, 0.7)',
     buildingConstruct: 'rgba(210, 153, 34, 0.4)',
 };
 
@@ -91,10 +93,10 @@ function drawBuilding(entity, ox, oy) {
     const sx = x + ox - w / 2;
     const sy = y + oy - h / 2;
 
-    let fill = COLORS.commandCenter;
+    let fill = COLORS.playerBase;
     if (entity.type === ENTITY_TYPES.BARRACKS) fill = COLORS.barracks;
     if (entity.type === ENTITY_TYPES.SUPPLY_DEPOT) fill = COLORS.supplyDepot;
-    if (entity.type === ENTITY_TYPES.REFINERY) fill = COLORS.vespene;
+    if (entity.type === ENTITY_TYPES.REFINERY) fill = '#65a30d';
 
     if (entity.buildProgress < 100) {
         ctx.fillStyle = COLORS.buildingConstruct;
@@ -106,7 +108,7 @@ function drawBuilding(entity, ox, oy) {
     } else {
         ctx.fillStyle = fill;
         ctx.fillRect(sx, sy, w, h);
-        ctx.strokeStyle = COLORS.commandCenterAccent;
+        ctx.strokeStyle = COLORS.playerBorder;
         ctx.lineWidth = 1;
         ctx.strokeRect(sx, sy, w, h);
     }
@@ -122,7 +124,7 @@ function drawSCV(entity, ox, oy) {
     const { x, y } = worldToScreen(entity.gridX, entity.gridY);
     const sx = x + ox;
     const sy = y + oy;
-    ctx.fillStyle = entity.state === 'mining' ? '#f0883e' : COLORS.scv;
+    ctx.fillStyle = entity.state === 'mining' ? '#ca8a04' : COLORS.playerUnit;
     ctx.beginPath();
     ctx.arc(sx, sy, 6, 0, Math.PI * 2);
     ctx.fill();
@@ -160,26 +162,44 @@ function drawEnemyEntity(entity, ox, oy) {
         const { x, y } = worldToScreen(entity.gridX + (def.width || 1) / 2, entity.gridY + (def.height || 1) / 2);
         const sx = x + ox - w / 2;
         const sy = y + oy - h / 2;
-        ctx.fillStyle = '#dc2626';
+        ctx.fillStyle = COLORS.enemyBase;
         ctx.fillRect(sx, sy, w, h);
-        ctx.strokeStyle = '#b91c1c';
+        ctx.strokeStyle = '#7f1d1d';
+        ctx.lineWidth = 1;
         ctx.strokeRect(sx, sy, w, h);
+        if (entity.selected) {
+            ctx.strokeStyle = COLORS.enemySelection;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(sx - 2, sy - 2, w + 4, h + 4);
+        }
     } else if (entity.type === ENTITY_TYPES.SCV) {
         const { x, y } = worldToScreen(entity.gridX, entity.gridY);
         const sx = x + ox;
         const sy = y + oy;
-        ctx.fillStyle = '#ef4444';
+        ctx.fillStyle = COLORS.enemyUnit;
         ctx.beginPath();
         ctx.arc(sx, sy, 6, 0, Math.PI * 2);
         ctx.fill();
+        if (entity.selected) {
+            ctx.strokeStyle = COLORS.enemySelection;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+            ctx.stroke();
+        }
     } else if (entity.type === ENTITY_TYPES.MARINE) {
         const { x, y } = worldToScreen(entity.gridX, entity.gridY);
         const sx = x + ox;
         const sy = y + oy;
-        ctx.fillStyle = '#dc2626';
+        ctx.fillStyle = COLORS.enemyUnit;
         ctx.fillRect(sx - 4, sy - 3, 8, 6);
-        ctx.fillStyle = '#b91c1c';
+        ctx.fillStyle = '#991b1b';
         ctx.fillRect(sx + 4, sy - 1, 6, 2);
+        if (entity.selected) {
+            ctx.strokeStyle = COLORS.enemySelection;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(sx - 6, sy - 5, 16, 10);
+        }
     }
 }
 
@@ -187,17 +207,18 @@ function drawMarine(entity, ox, oy) {
     const { x, y } = worldToScreen(entity.gridX, entity.gridY);
     const sx = x + ox;
     const sy = y + oy;
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.fillStyle = COLORS.marine;
-    ctx.fillRect(-4, -3, 8, 6);
-    ctx.fillStyle = '#8b5cf6';
-    ctx.fillRect(4, -1, 6, 2);
-    ctx.restore();
+    ctx.fillStyle = COLORS.playerUnit;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COLORS.playerBorder;
+    ctx.fillRect(sx + 4, sy - 1, 5, 2);
     if (entity.selected) {
         ctx.strokeStyle = COLORS.selection;
         ctx.lineWidth = 2;
-        ctx.strokeRect(sx - 6, sy - 5, 16, 10);
+        ctx.beginPath();
+        ctx.arc(sx, sy, 7, 0, Math.PI * 2);
+        ctx.stroke();
     }
 }
 

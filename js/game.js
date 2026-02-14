@@ -38,7 +38,6 @@
                 return bd - ad;
             });
         for (const e of selectable) {
-            if (e.faction === 'enemy') continue;
             if (e.width && e.height) {
                 if (clickGridX >= e.gridX && clickGridX < e.gridX + e.width &&
                     clickGridY >= e.gridY && clickGridY < e.gridY + e.height) {
