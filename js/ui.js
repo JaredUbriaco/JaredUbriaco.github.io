@@ -69,13 +69,15 @@ function initUI(game) {
         buildMenu.innerHTML = '';
         if (buildings.length === 1 && buildings[0].buildProgress >= 100) {
             const def = BUILDINGS[buildings[0].type];
+            const map = gameInstance ? gameInstance.state.map : null;
+
             if (def && def.produces) {
                 def.produces.forEach(unitType => {
                     const unitDef = UNITS[unitType];
                     if (!unitDef) return;
                     const cost = unitDef.cost;
-                    const affordable = gameInstance && canAfford(gameInstance.state.map, cost);
-                    const hasSupply = gameInstance && hasSupplySpace(gameInstance.state.map, unitDef.supplyCost || 0);
+                    const affordable = map && canAfford(map, cost);
+                    const hasSupply = map && hasSupplySpace(map, unitDef.supplyCost || 0);
                     const btn = document.createElement('button');
                     btn.className = 'build-btn';
                     btn.textContent = `${unitDef.name} (${cost.minerals}M)`;
@@ -83,6 +85,25 @@ function initUI(game) {
                     btn.onclick = () => {
                         if (gameInstance && canAfford(gameInstance.state.map, cost) && hasSupplySpace(gameInstance.state.map, unitDef.supplyCost || 0)) {
                             gameInstance.buildUnit(buildings[0], unitType);
+                            updateSelectionPanel();
+                        }
+                    };
+                    buildMenu.appendChild(btn);
+                });
+            }
+            if (def && def.builds) {
+                def.builds.forEach(buildingType => {
+                    const bdef = BUILDINGS[buildingType];
+                    if (!bdef) return;
+                    const hasRequired = !bdef.requires || gameInstance.state.entities.some(e => e.type === bdef.requires);
+                    const affordable = map && canAfford(map, bdef.cost);
+                    const btn = document.createElement('button');
+                    btn.className = 'build-btn';
+                    btn.textContent = `${bdef.name} (${bdef.cost.minerals}M)`;
+                    btn.disabled = !affordable || !hasRequired;
+                    btn.onclick = () => {
+                        if (gameInstance && hasRequired && canAfford(gameInstance.state.map, bdef.cost)) {
+                            gameInstance.buildBuilding(buildingType);
                             updateSelectionPanel();
                         }
                     };

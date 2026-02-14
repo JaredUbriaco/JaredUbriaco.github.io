@@ -6,8 +6,8 @@
 const CONFIG = {
     TILE_WIDTH: 64,
     TILE_HEIGHT: 32,
-    MAP_COLS: 24,
-    MAP_ROWS: 24,
+    MAP_COLS: 40,
+    MAP_ROWS: 40,
     WIN_CONDITION: {
         totalUnits: 20,
         totalBuildings: 4,
@@ -35,6 +35,7 @@ const BUILDINGS = {
         width: 3,
         height: 2,
         produces: [ENTITY_TYPES.SCV],
+        builds: [ENTITY_TYPES.SUPPLY_DEPOT, ENTITY_TYPES.BARRACKS],
     },
     [ENTITY_TYPES.BARRACKS]: {
         name: 'Barracks',

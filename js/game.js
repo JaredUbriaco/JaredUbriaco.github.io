@@ -76,6 +76,11 @@
         });
     }
 
+    function buildBuilding(buildingType) {
+        const result = tryBuild(state.entities, state.map, buildingType);
+        return !!result;
+    }
+
     function buildUnit(building, unitType) {
         const def = BUILDINGS[building.type];
         if (!def || !def.produces || !def.produces.includes(unitType)) return false;
@@ -116,6 +121,7 @@
             while (accumulated >= 16) {
                 accumulated -= 16;
                 state.entities.forEach(e => updateEntity(e, state.entities, state.map, 16));
+                updateExplored(state.entities, state.explored);
                 aiCooldown++;
                 if (aiCooldown >= 30) {
                     aiCooldown = 0;
@@ -142,12 +148,20 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
+    if (!state.explored) {
+        state.explored = [];
+        for (let r = 0; r < CONFIG.MAP_ROWS; r++) {
+            state.explored[r] = [];
+            for (let c = 0; c < CONFIG.MAP_COLS; c++) state.explored[r][c] = false;
+        }
+    }
     initRender(canvas);
     ui = initUI({
         state,
         getEntityAtScreen,
         getUnitsInBox,
         buildUnit,
+        buildBuilding,
         togglePause,
         cycleSpeed,
     });
@@ -161,6 +175,7 @@
         getEntityAtScreen,
         getUnitsInBox,
         buildUnit,
+        buildBuilding,
         togglePause,
         cycleSpeed,
     };

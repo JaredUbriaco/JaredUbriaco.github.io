@@ -82,11 +82,11 @@ function createInitialState() {
     const scv = createEntity(ENTITY_TYPES.SCV, ccX + 4, ccY);
     entities.push(scv);
 
-    // Mineral patches well clear of base - no overlap with CC footprint (ccX to ccX+2, ccY to ccY+1)
+    // Mineral patches - mix of nearby (in starting vision) and farther (to discover)
     const mineralPositions = [
-        [ccX - 7, ccY - 6], [ccX - 6, ccY - 7], [ccX - 5, ccY - 8],
-        [ccX + 7, ccY - 5], [ccX + 8, ccY - 4], [ccX + 6, ccY - 6],
-        [ccX - 7, ccY + 5], [ccX + 7, ccY + 4],
+        [ccX - 7, ccY - 6], [ccX - 6, ccY - 7], [ccX + 7, ccY - 5], [ccX + 6, ccY - 6],
+        [ccX - 7, ccY + 5], [ccX + 7, ccY + 4], [ccX - 12, ccY - 10], [ccX + 12, ccY - 8],
+        [ccX - 10, ccY + 12], [ccX + 14, ccY + 6], [ccX + 18, ccY - 4], [ccX - 15, ccY - 2],
     ];
     mineralPositions.forEach(([x, y]) => {
         if (x >= 0 && x < CONFIG.MAP_COLS && y >= 0 && y < CONFIG.MAP_ROWS) {
@@ -94,5 +94,19 @@ function createInitialState() {
         }
     });
 
-    return { entities, map };
+    const explored = [];
+    for (let r = 0; r < CONFIG.MAP_ROWS; r++) {
+        explored[r] = [];
+        for (let c = 0; c < CONFIG.MAP_COLS; c++) {
+            explored[r][c] = false;
+        }
+    }
+    for (let r = ccY - 4; r <= ccY + 6; r++) {
+        for (let c = ccX - 4; c <= ccX + 8; c++) {
+            if (r >= 0 && r < CONFIG.MAP_ROWS && c >= 0 && c < CONFIG.MAP_COLS) {
+                explored[r][c] = true;
+            }
+        }
+    }
+    return { entities, map, explored };
 }

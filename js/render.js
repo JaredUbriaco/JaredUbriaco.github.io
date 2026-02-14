@@ -143,22 +143,39 @@ function drawMarine(entity, ox, oy) {
     const { x, y } = worldToScreen(entity.gridX, entity.gridY);
     const sx = x + ox;
     const sy = y + oy;
+    ctx.save();
+    ctx.translate(sx, sy);
     ctx.fillStyle = COLORS.marine;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 5, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillRect(-4, -3, 8, 6);
+    ctx.fillStyle = '#8b5cf6';
+    ctx.fillRect(4, -1, 6, 2);
+    ctx.restore();
     if (entity.selected) {
         ctx.strokeStyle = COLORS.selection;
         ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(sx, sy, 7, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.strokeRect(sx - 6, sy - 5, 16, 10);
     }
+}
+
+function isExplored(explored, gridX, gridY, width, height) {
+    if (!explored) return true;
+    const w = width || 1;
+    const h = height || 1;
+    for (let dy = 0; dy < h; dy++) {
+        for (let dx = 0; dx < w; dx++) {
+            const gx = Math.floor(gridX) + dx;
+            const gy = Math.floor(gridY) + dy;
+            if (gy >= 0 && gy < explored.length && gx >= 0 && gx < (explored[0] || []).length && explored[gy][gx]) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 function render(state, selectionBox) {
     if (!canvas || !ctx) return;
-    const { entities } = state;
+    const { entities, explored } = state;
     const ox = getRenderOffset().x;
     const oy = getRenderOffset().y;
 
@@ -180,12 +197,19 @@ function render(state, selectionBox) {
 
     for (let row = 0; row < CONFIG.MAP_ROWS; row++) {
         for (let col = 0; col < CONFIG.MAP_COLS; col++) {
-            drawIsometricTile(col, row, COLORS.grid, ox, oy);
+            if (explored && !explored[row][col]) {
+                drawIsometricTile(col, row, 'rgba(0,0,0,0.92)', ox, oy);
+            } else {
+                drawIsometricTile(col, row, COLORS.grid, ox, oy);
+            }
         }
     }
 
     const drawOrder = entities
-        .filter(e => e.type !== ENTITY_TYPES.MINERAL_PATCH && e.type !== ENTITY_TYPES.VESPENE_GEYSER)
+        .filter(e => {
+            if (e.type === ENTITY_TYPES.MINERAL_PATCH || e.type === ENTITY_TYPES.VESPENE_GEYSER) return false;
+            return isExplored(explored, e.gridX, e.gridY, e.width, e.height);
+        })
         .sort((a, b) => {
             const ax = a.gridX + ((a.width || 1) / 2);
             const ay = a.gridY + ((a.height || 1) / 2);
@@ -194,7 +218,8 @@ function render(state, selectionBox) {
             return (ax + ay) - (bx + by);
         });
 
-    entities.filter(e => e.type === ENTITY_TYPES.MINERAL_PATCH).forEach(e => drawMineralPatch(e, ox, oy));
+    entities.filter(e => e.type === ENTITY_TYPES.MINERAL_PATCH && isExplored(explored, e.gridX, e.gridY, 1, 1))
+        .forEach(e => drawMineralPatch(e, ox, oy));
 
     drawOrder.forEach(e => {
         if (e.type === ENTITY_TYPES.COMMAND_CENTER || e.type === ENTITY_TYPES.BARRACKS ||

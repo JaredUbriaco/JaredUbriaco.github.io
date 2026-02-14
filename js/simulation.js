@@ -252,7 +252,7 @@ function tryBuild(entities, map, buildingType) {
     const cc = entities.find(e => e.type === ENTITY_TYPES.COMMAND_CENTER);
     if (!cc) return null;
 
-    const offsets = [[2, 0], [-2, 0], [0, 2], [0, -2], [2, 2], [-2, -2]];
+    const offsets = [[3, 0], [-3, 0], [0, 3], [0, -3], [3, 2], [-3, 2], [2, 3], [-2, 3], [4, 0], [-4, 1]];
     for (const [dx, dy] of offsets) {
         const gx = cc.gridX + dx;
         const gy = cc.gridY + dy;
@@ -272,6 +272,39 @@ function tryBuild(entities, map, buildingType) {
         }
     }
     return null;
+}
+
+const VISION_UNIT = 5;
+const VISION_BUILDING = 6;
+
+function updateExplored(entities, explored) {
+    if (!explored) return;
+    for (const e of entities) {
+        let range = 0;
+        let cx, cy;
+        if (e.type === ENTITY_TYPES.SCV || e.type === ENTITY_TYPES.MARINE) {
+            range = VISION_UNIT;
+            cx = Math.floor(e.gridX);
+            cy = Math.floor(e.gridY);
+        } else if (e.width && e.height) {
+            range = VISION_BUILDING;
+            cx = e.gridX + Math.floor(e.width / 2);
+            cy = e.gridY + Math.floor(e.height / 2);
+        }
+        if (range > 0) {
+            for (let dy = -range; dy <= range; dy++) {
+                for (let dx = -range; dx <= range; dx++) {
+                    if (dx * dx + dy * dy <= range * range) {
+                        const rx = cx + dx;
+                        const ry = cy + dy;
+                        if (rx >= 0 && rx < CONFIG.MAP_COLS && ry >= 0 && ry < CONFIG.MAP_ROWS) {
+                            explored[ry][rx] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 function checkWinCondition(entities, map) {
