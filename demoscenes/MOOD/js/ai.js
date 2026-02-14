@@ -15,17 +15,25 @@ import { getCurrentObjectiveTask } from './objectives.js';
 import { angleTo, distanceTo, normalizeAngle } from './utils.js';
 
 // ── Tuning ──────────────────────────────────────────────────────────
+// lookDxMax: AI outputs lookDX; player does angle += lookDX * MOUSE_SENSITIVITY (0.002).
+//   Clamp to ±lookDxMax so turn rate ≈ lookDxMax*0.002 rad/frame (e.g. 28 → ~3 rad/s at 60fps).
+// combatFacingTolerance: handgun is hitscan (single ray) — only fire when aimed within this
+//   (rad). 0.2 was too loose (~11°) so we fired at edge of aim and missed; ~0.05 ≈ 3° centers shot.
 export const AI_TUNING = {
     combatMaxRange: 12,
-    turnGain: 8,
+    turnGain: 10,
+    lookDxMax: 28,
     facingTolerance: 0.2,
+    combatFacingTolerance: 0.05,
     interactFacingTolerance: INTERACTION_ANGLE,
     pathReachDist: 0.4,
 };
 
 const COMBAT_MAX_RANGE = AI_TUNING.combatMaxRange;
 const TURN_GAIN = AI_TUNING.turnGain;
+const LOOK_DX_MAX = AI_TUNING.lookDxMax;
 const FACING_TOLERANCE = AI_TUNING.facingTolerance;
+const COMBAT_FACING_TOLERANCE = AI_TUNING.combatFacingTolerance;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
 
 // ── Scripted route (1990s-style: fixed sequence to complete the level) ─
@@ -282,7 +290,7 @@ function steerToward(state, goal) {
     const target = getSteerTarget(state, goal);
     const wantAngle = angleTo(p.x, p.y, target.x, target.y);
     const angleDiff = normalizeAngle(wantAngle - p.angle);
-    inp.lookDX = Math.max(-1, Math.min(1, angleDiff * TURN_GAIN));
+    inp.lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, angleDiff * TURN_GAIN));
     inp.lookDY = 0;
 
     const aligned = Math.abs(angleDiff) <= FACING_TOLERANCE;
@@ -319,7 +327,7 @@ function performAction(state, goal) {
     if (goal.action === 'fire') {
         const dist = distanceTo(p.x, p.y, goal.x, goal.y);
         const wantAngle = angleTo(p.x, p.y, goal.x, goal.y);
-        if (dist <= COMBAT_MAX_RANGE && Math.abs(normalizeAngle(wantAngle - p.angle)) <= FACING_TOLERANCE) {
+        if (dist <= COMBAT_MAX_RANGE && Math.abs(normalizeAngle(wantAngle - p.angle)) <= COMBAT_FACING_TOLERANCE) {
             inp.fire = true;
         }
     }
