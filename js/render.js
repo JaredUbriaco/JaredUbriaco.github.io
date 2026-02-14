@@ -77,10 +77,36 @@ function drawMineralPatch(entity, ox, oy) {
     const sy = y + oy + CONFIG.TILE_HEIGHT / 4;
     const remaining = entity.minerals / 1500;
     ctx.fillStyle = remaining > 0 ? COLORS.mineral : COLORS.mineralDepleted;
-    ctx.globalAlpha = 0.6 + remaining * 0.4;
-    ctx.beginPath();
-    ctx.arc(sx, sy, CONFIG.TILE_WIDTH / 6, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.strokeStyle = remaining > 0 ? 'rgba(88, 166, 255, 0.4)' : 'rgba(48, 54, 61, 0.3)';
+    ctx.globalAlpha = 0.7 + remaining * 0.3;
+
+    const crystals = [
+        { baseX: 0, baseY: 4, tipX: 0, tipY: -6, w: 5 },
+        { baseX: -5, baseY: 2, tipX: 6, tipY: 2, w: 4 },
+        { baseX: 3, baseY: 3, tipX: -4, tipY: 5, w: 4 },
+        { baseX: -3, baseY: -2, tipX: 2, tipY: -5, w: 3 },
+        { baseX: 4, baseY: -1, tipX: -3, tipY: 4, w: 3 },
+        { baseX: -2, baseY: 5, tipX: 3, tipY: -3, w: 3 },
+    ];
+    crystals.forEach(c => {
+        const bx = sx + c.baseX;
+        const by = sy + c.baseY;
+        const tx = sx + c.tipX;
+        const ty = sy + c.tipY;
+        const hw = c.w / 2;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        const perpX = -(c.tipY - c.baseY);
+        const perpY = c.tipX - c.baseX;
+        const len = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
+        ctx.lineTo(bx + (perpX / len) * hw, by + (perpY / len) * hw);
+        ctx.lineTo(bx - (perpX / len) * hw, by - (perpY / len) * hw);
+        ctx.closePath();
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    });
+
     ctx.globalAlpha = 1;
 }
 
