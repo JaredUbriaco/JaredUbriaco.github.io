@@ -83,7 +83,8 @@ const BACKUP_DURATION = 0.55;             // seconds to back up + wiggle when st
 const BACKUP_DURATION_EXTRA = 1.0;        // after many replans, back up longer to escape bad spots
 const REPLAN_COUNT_FOR_EXTRA_BACKUP = 3;
 const NULL_PATH_STUCK_THRESHOLD = 0.8;    // if path is null for this long (nav goal), treat as stuck
-const DOOR_STUCK_TIME = 3;                // at door in range this long without opening → backup and re-approach
+const INTERACT_NULL_PATH_SAFE_DIST = 6;   // within this many tiles of door/button, never replan for null path (just walk there)
+const DOOR_STUCK_TIME = 6;               // at door in range AND facing, this long without opening → backup and re-approach
 const DOOR_FALLBACK_AFTER_ATTEMPTS = 5;   // after this many door backup cycles, log FAILURE/FALLBACK
 
 // ── List of goals (scripted route from ai-route framework + level data) ─
@@ -151,12 +152,18 @@ function isWalkable(tx, ty) {
     return !isSolid(tx, ty);
 }
 
-/** Tile we should stand on to interact with (gx, gy) from (px, py). */
+/** Tile we should stand on to interact with (gx, gy) from (px, py). Prefers tile toward player; if that tile is solid (narrow corridor), returns first walkable of the 4 cardinals so BFS never targets a wall. */
 function getApproachTile(gx, gy, px, py) {
     const tx = Math.floor(gx);
     const ty = Math.floor(gy);
     if (!isSolid(gx, gy)) return { x: tx, y: ty };
-    return { x: tx + Math.sign(px - gx), y: ty + Math.sign(py - gy) };
+    const preferred = { x: tx + Math.sign(px - gx), y: ty + Math.sign(py - gy) };
+    if (isWalkable(preferred.x, preferred.y)) return preferred;
+    const cardinals = [{ x: tx - 1, y: ty }, { x: tx + 1, y: ty }, { x: tx, y: ty - 1 }, { x: tx, y: ty + 1 }];
+    for (const c of cardinals) {
+        if (isWalkable(c.x, c.y)) return c;
+    }
+    return preferred;
 }
 
 /** BFS from (sx,sy) to (ex,ey). Returns path [start, ..., end] or null. */
@@ -280,9 +287,9 @@ function hasLineOfSight(x1, y1, x2, y2) {
     return true;
 }
 
-/** True if moving one small step forward from (x,y,angle) would hit solid. */
+/** True if moving one small step forward from (x,y,angle) would hit solid. Uses a slightly shorter step so the AI doesn't give up too early at corners; player physics (wall sliding) handles the actual stop and lets us slide along walls. */
 function isPathBlocked(x, y, angle) {
-    const step = PLAYER_RADIUS * 2 + 0.1;
+    const step = PLAYER_RADIUS * 1.4 + 0.05;
     return isSolid(x + Math.cos(angle) * step, y + Math.sin(angle) * step);
 }
 
@@ -538,7 +545,11 @@ function steerToward(state, goal) {
             return;
         }
         // Null path: BFS returned no path to goal; don't steer at goal forever
-        if (ai._pathWasNull) {
+        const distToInteractForNull = isInteractGoal(goal)
+            ? (goal.door ? distanceTo(p.x, p.y, goal.door.cx, goal.door.cy) : distanceTo(p.x, p.y, goal.x, goal.y))
+            : Infinity;
+        const nearInteractNoNullReplan = distToInteractForNull < INTERACT_NULL_PATH_SAFE_DIST;
+        if (ai._pathWasNull && !nearInteractNoNullReplan) {
             ai._nullPathTime = (ai._nullPathTime || 0) + dt;
             if (ai._nullPathTime >= NULL_PATH_STUCK_THRESHOLD) {
                 invalidatePathCache();
@@ -552,6 +563,7 @@ function steerToward(state, goal) {
         } else {
             ai._nullPathTime = 0;
         }
+        if (nearInteractNoNullReplan) ai._nullPathTime = 0;
 
         const atDoorInRange = isInteractGoal(goal) && (goal.door
             ? distanceTo(p.x, p.y, goal.door.cx, goal.door.cy) <= INTERACTION_RANGE
@@ -602,7 +614,6 @@ function steerToward(state, goal) {
     if (Math.abs(angleDiff) <= AIM_DEAD_ZONE) {
         inp.lookDX = 0;
     } else {
-        const isCombat = goal.type === 'enemy' || goal.action === 'fire';
         const turnGain = isCombat ? TURN_GAIN * 1.2 : TURN_GAIN; // Slightly faster track in combat
         let lookDX = angleDiff * turnGain;
         const maxTurnPerFrame = (Math.abs(angleDiff) * NO_OVERSHOOT_FRAC) / MOUSE_SENSITIVITY;
@@ -612,13 +623,19 @@ function steerToward(state, goal) {
     inp.lookDY = 0;
 
     // ── Movement: allow any combination of forward/back/strafe (diagonal movement like W+A). ──
-    const inCombatStandoff = isCombat && distToTarget <= COMBAT_NO_ADVANCE_DIST;
+    const hasLOSToEnemy = isCombat && hasLineOfSight(p.x, p.y, goal.x, goal.y);
+    const inCombatStandoff = isCombat && (distToTarget <= COMBAT_NO_ADVANCE_DIST || !hasLOSToEnemy);
 
     if (isCombat) {
         if (inCombatStandoff) {
             inp.moveForward = false;
-            if (distToTarget < COMBAT_BACK_UP_DIST) {
+            if (hasLOSToEnemy && distToTarget < COMBAT_BACK_UP_DIST) {
                 inp.moveBack = true;
+                inp.strafeLeft = false;
+                inp.strafeRight = false;
+            } else if (!hasLOSToEnemy) {
+                // Enemy behind wall: only turn toward last known position, don't advance or back up
+                inp.moveBack = false;
                 inp.strafeLeft = false;
                 inp.strafeRight = false;
             } else {
@@ -756,8 +773,9 @@ export function update(state) {
     if (goal && goal.type === 'door' && goal.door) {
         const dist = distanceTo(state.player.x, state.player.y, goal.door.cx, goal.door.cy);
         const inRange = dist <= INTERACTION_RANGE;
+        const facing = inRange && isInRangeAndFacing(state.player.x, state.player.y, state.player.angle, goal.door.cx, goal.door.cy, AI_TUNING.interactFacingTolerance);
         const elapsed = state.time.elapsed || 0;
-        if (inRange) {
+        if (inRange && facing) {
             if (state.ai._atDoorSince == null) state.ai._atDoorSince = elapsed;
             if (goal.door.openProgress < 1 && (elapsed - state.ai._atDoorSince) >= DOOR_STUCK_TIME) {
                 invalidatePathCache();
