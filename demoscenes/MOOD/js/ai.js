@@ -85,6 +85,7 @@ const REPLAN_COUNT_FOR_EXTRA_BACKUP = 3;
 const NULL_PATH_STUCK_THRESHOLD = 0.8;    // if path is null for this long (nav goal), treat as stuck
 const INTERACT_NULL_PATH_SAFE_DIST = 6;   // within this many tiles of door/button, never replan for null path (just walk there)
 const DOOR_STUCK_TIME = 6;               // at door in range AND facing, this long without opening → backup and re-approach
+const STUCK_APPROACHING_INTERACT = 3;    // approaching door/button but not in range and no progress this long → backup (escape corner)
 const DOOR_FALLBACK_AFTER_ATTEMPTS = 5;   // after this many door backup cycles, log FAILURE/FALLBACK
 
 // ── List of goals (scripted route from ai-route framework + level data) ─
@@ -596,10 +597,28 @@ function steerToward(state, goal) {
         const madeProgressTowardInteract = isInteract && (lastInteractDist != null && distToInteract < lastInteractDist - STUCK_PROGRESS_MIN);
         if (isInteract) ai._lastInteractDist = distToInteract; else ai._lastInteractDist = undefined;
 
-        // For interact goals (button, door, pickup): never replan for "no progress" — steer target jitter causes false positives.
-        // Only replan on null path or door-stuck (at door 3s without opening). Bot walks to goal; null-path handles real blocks.
+        // For interact goals (button, door, pickup): never replan for "no progress" toward steer target — jitter causes false positives.
+        // Replan on: null path, door-stuck (at door 6s without opening), or stuck approaching (near but not in range, no progress 3s — e.g. corner).
         const committedToInteract = isInteract && distToInteract <= COMMIT_TO_INTERACT_DIST;
         if (committedToInteract) ai._stuckNoProgressTime = 0;
+        if (isInteract && !atDoorInRange) {
+            if (madeProgressTowardInteract) {
+                ai._stuckApproachingInteractTime = 0;
+            } else {
+                ai._stuckApproachingInteractTime = (ai._stuckApproachingInteractTime || 0) + dt;
+                if (ai._stuckApproachingInteractTime >= STUCK_APPROACHING_INTERACT) {
+                    invalidatePathCache();
+                    const replans = (ai._replanCount || 0) + 1;
+                    ai._replanCount = replans;
+                    const backupLen = replans >= REPLAN_COUNT_FOR_EXTRA_BACKUP ? BACKUP_DURATION_EXTRA : BACKUP_DURATION;
+                    ai._backUpUntil = elapsed + backupLen;
+                    ai._stuckApproachingInteractTime = 0;
+                    console.log('[AI] REPLAN — stuck approaching door/button (no progress ' + STUCK_APPROACHING_INTERACT + 's), backing up (replan #' + replans + ')');
+                }
+            }
+        } else if (isInteract) {
+            ai._stuckApproachingInteractTime = 0;
+        }
         if (!isInteract && lastDist != null && !atWaypoint) {
             const madeProgress = distToTarget < lastDist - STUCK_PROGRESS_MIN;
             if (!madeProgress) {
@@ -619,12 +638,14 @@ function steerToward(state, goal) {
         } else if (isInteract) {
             ai._stuckNoProgressTime = 0;
         }
+        if (!isInteract) ai._stuckApproachingInteractTime = 0;
         ai._lastSteerTargetDist = distToTarget;
     } else {
         state.ai._lastSteerTargetDist = distToTarget;
         state.ai._stuckNoProgressTime = 0;
         state.ai._nullPathTime = 0;
         state.ai._lastInteractDist = undefined;
+        state.ai._stuckApproachingInteractTime = 0;
     }
 
     // ── Aim: always turn toward target (like a player moving the mouse). Never stop aiming when we have a goal. ──
