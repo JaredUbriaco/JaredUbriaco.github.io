@@ -12,7 +12,7 @@ import {
     INTERNAL_WIDTH, INTERNAL_HEIGHT,
     TILE, PROJECTION_PLANE,
     BREATHING_AMPLITUDE, BREATHING_SPEED,
-    PITCH_SCALE,
+    PITCH_SCALE, DOOR_RECESS_DEPTH,
 } from './config.js';
 
 import { getTile, isSolid, doors, INTERACTABLE_POSITIONS } from './map.js';
@@ -86,6 +86,13 @@ function getFloorColor(distance) {
     const fogFactor = 1 / (1 + distance * 0.3);
     const l = 10 * fogFactor;
     return `hsl(270, 20%, ${Math.max(1, l)}%)`;
+}
+
+/** Darker shade for door/gate recess (set-back frame) so the panel reads as mounted from both sides. */
+function getRecessColor(distance) {
+    const fogFactor = 1 / (1 + distance * 0.25);
+    const l = 6 * fogFactor;
+    return `hsl(240, 25%, ${Math.max(1, l)}%)`;
 }
 
 // ── Cast Single Ray (DDA) ───────────────────────────────────────────
@@ -236,77 +243,82 @@ export function renderWalls(ctx, player, timeNow) {
         // Store in z-buffer
         zBuffer[col] = correctedDist;
 
-        // Wall strip height
-        let wallHeight = (1 / correctedDist) * PROJECTION_PLANE;
+        // Frame (wall) extent: full strip at hit distance
+        let frameHeight = (1 / correctedDist) * PROJECTION_PLANE;
+        frameHeight *= breathe;
+        const wallTop = Math.floor(horizonY - frameHeight / 2);
+        const wallBottom = Math.floor(horizonY + frameHeight / 2);
 
-        // Apply breathing modulation
-        wallHeight *= breathe;
-
-        // Doors are shorter than full walls so they read as gate panels.
-        if (isDoorTile(hit.wallType)) {
-            wallHeight *= 0.86;
-        }
-
-        // Door animation: partially open doors have reduced height
+        // Doors/gates: panel is recessed (drawn at distance + RECESS) so it looks set into the wall from both sides
+        const isDoor = isDoorTile(hit.wallType);
+        const recessDist = isDoor ? correctedDist + DOOR_RECESS_DEPTH : correctedDist;
+        let panelHeight = (1 / recessDist) * PROJECTION_PLANE;
+        panelHeight *= breathe;
+        if (isDoor) panelHeight *= 0.86;  // door/gate panel slightly shorter than full opening
         if (hit.doorProgress !== undefined && hit.doorProgress > 0) {
-            wallHeight *= (1 - hit.doorProgress);
+            panelHeight *= (1 - hit.doorProgress);
         }
+        if (hit.wallType === TILE.BUTTON) panelHeight *= 0.12;
 
-        // Buttons are intentionally shorter than doors/walls.
-        if (hit.wallType === TILE.BUTTON) {
-            wallHeight *= 0.12;
-        }
+        const panelTop = Math.floor(horizonY - panelHeight / 2);
+        const panelBottom = Math.floor(horizonY + panelHeight / 2);
 
-        // Wall strip screen positions
-        const wallTop = Math.floor(horizonY - wallHeight / 2);
-        const wallBottom = Math.floor(horizonY + wallHeight / 2);
-
-        // ── Draw Ceiling (above wall) ───────────────────────────
+        // ── Draw Ceiling (above frame) ───────────────────────────
         if (wallTop > 0) {
-            // Simple distance interpolation for ceiling shading
-            const ceilDist = correctedDist * 0.8; // approximate
+            const ceilDist = correctedDist * 0.8;
             ctx.fillStyle = getCeilingColor(ceilDist);
             ctx.fillRect(col, 0, 1, Math.max(0, wallTop));
         }
 
-        // ── Draw Wall Strip ─────────────────────────────────────
-        const clampedTop = Math.max(0, wallTop);
-        const clampedBottom = Math.min(INTERNAL_HEIGHT, wallBottom);
-        if (clampedBottom > clampedTop) {
-            let color = getWallColor(hit.wallType, hit.hitSide, correctedDist);
-            if (isDoorTile(hit.wallType) && hit.wallX !== undefined) {
-                const slat = Math.floor(hit.wallX * 8) % 2;
-                if (slat === 0) {
-                    color = getWallColor(hit.wallType, hit.hitSide, correctedDist * 1.25);
-                }
+        // ── Draw recess + panel (doors/gates) or single wall strip ──
+        if (isDoor) {
+            // Recess band above panel (frame visible above door)
+            if (panelTop > wallTop && panelTop > 0) {
+                ctx.fillStyle = getRecessColor(correctedDist);
+                ctx.fillRect(col, Math.max(0, wallTop), 1, Math.min(panelTop, INTERNAL_HEIGHT) - Math.max(0, wallTop));
             }
-            ctx.fillStyle = color;
-            ctx.fillRect(col, clampedTop, 1, clampedBottom - clampedTop);
-
-            // Wall-mounted button: small, unique shape embedded on the wall.
-            if (isButtonWallHit(hit) && hit.wallX > 0.34 && hit.wallX < 0.66) {
-                const mountHeight = Math.max(2, Math.floor(wallHeight * 0.2));
-                const mountTop = Math.floor(horizonY - mountHeight * 0.5);
-                const mountBottom = Math.min(INTERNAL_HEIGHT, mountTop + mountHeight);
-
-                // Backplate
-                ctx.fillStyle = 'rgba(40, 16, 8, 0.95)';
-                ctx.fillRect(col, Math.max(0, mountTop), 1, Math.max(0, mountBottom - Math.max(0, mountTop)));
-
-                // Orange core
-                const coreHeight = Math.max(1, Math.floor(mountHeight * 0.55));
-                const coreTop = Math.floor(horizonY - coreHeight * 0.5);
-                ctx.fillStyle = '#ff7a1a';
-                ctx.fillRect(col, Math.max(0, coreTop), 1, Math.max(0, coreHeight));
-
-                // Bright center segment for distinct "button" read.
-                const centerTop = Math.floor(horizonY - 1);
-                ctx.fillStyle = '#ffe3c4';
-                ctx.fillRect(col, Math.max(0, centerTop), 1, 2);
+            // Door/gate panel (recessed, centered in frame)
+            const clampedPanelTop = Math.max(0, panelTop);
+            const clampedPanelBottom = Math.min(INTERNAL_HEIGHT, panelBottom);
+            if (clampedPanelBottom > clampedPanelTop) {
+                let color = getWallColor(hit.wallType, hit.hitSide, recessDist);
+                if (hit.wallX !== undefined) {
+                    const slat = Math.floor(hit.wallX * 8) % 2;
+                    if (slat === 0) color = getWallColor(hit.wallType, hit.hitSide, recessDist * 1.25);
+                }
+                ctx.fillStyle = color;
+                ctx.fillRect(col, clampedPanelTop, 1, clampedPanelBottom - clampedPanelTop);
+            }
+            // Recess band below panel
+            if (panelBottom < wallBottom && wallBottom < INTERNAL_HEIGHT) {
+                ctx.fillStyle = getRecessColor(correctedDist);
+                ctx.fillRect(col, Math.max(0, panelBottom), 1, Math.min(wallBottom, INTERNAL_HEIGHT) - Math.max(0, panelBottom));
+            }
+        } else {
+            const clampedTop = Math.max(0, hit.wallType === TILE.BUTTON ? panelTop : wallTop);
+            const clampedBottom = Math.min(INTERNAL_HEIGHT, hit.wallType === TILE.BUTTON ? panelBottom : wallBottom);
+            if (clampedBottom > clampedTop) {
+                let color = getWallColor(hit.wallType, hit.hitSide, correctedDist);
+                ctx.fillStyle = color;
+                ctx.fillRect(col, clampedTop, 1, clampedBottom - clampedTop);
+                if (isButtonWallHit(hit) && hit.wallX > 0.34 && hit.wallX < 0.66) {
+                    const mountHeight = Math.max(2, Math.floor(panelHeight * 0.2));
+                    const mountTop = Math.floor(horizonY - mountHeight * 0.5);
+                    const mountBottom = Math.min(INTERNAL_HEIGHT, mountTop + mountHeight);
+                    ctx.fillStyle = 'rgba(40, 16, 8, 0.95)';
+                    ctx.fillRect(col, Math.max(0, mountTop), 1, Math.max(0, mountBottom - Math.max(0, mountTop)));
+                    const coreHeight = Math.max(1, Math.floor(mountHeight * 0.55));
+                    const coreTop = Math.floor(horizonY - coreHeight * 0.5);
+                    ctx.fillStyle = '#ff7a1a';
+                    ctx.fillRect(col, Math.max(0, coreTop), 1, Math.max(0, coreHeight));
+                    const centerTop = Math.floor(horizonY - 1);
+                    ctx.fillStyle = '#ffe3c4';
+                    ctx.fillRect(col, Math.max(0, centerTop), 1, 2);
+                }
             }
         }
 
-        // ── Draw Floor (below wall) ─────────────────────────────
+        // ── Draw Floor (below frame) ─────────────────────────────
         if (wallBottom < INTERNAL_HEIGHT) {
             const floorDist = correctedDist * 0.8;
             ctx.fillStyle = getFloorColor(floorDist);

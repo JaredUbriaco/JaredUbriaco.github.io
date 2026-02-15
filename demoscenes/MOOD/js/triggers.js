@@ -10,7 +10,7 @@ import {
     INTERACTION_RANGE, INTERACTION_ANGLE,
 } from './config.js';
 
-import { getTile, isSolid, doors, grid, INTERACTABLE_POSITIONS } from './map.js';
+import { getTile, isSolid, doors, gates, grid, INTERACTABLE_POSITIONS } from './map.js';
 import { consumeInteract } from './input.js';
 import { normalizeAngle } from './utils.js';
 
@@ -133,17 +133,17 @@ export function update(state) {
     const p = state.player;
     noInteractHintCooldown = Math.max(0, noInteractHintCooldown - dt);
 
-    // ── Animate Opening Doors ───────────────────────────────────
-    for (const key in doors) {
-        const door = doors[key];
-        if (door.opening && door.openProgress < 1) {
-            door.openProgress += dt / DOOR_OPEN_DURATION;
-            if (door.openProgress >= 1) {
-                door.openProgress = 1;
-                door.open = true;
-                door.opening = false;
-                // Mark tile as EMPTY so raycaster and collision treat it as open
-                grid[door.y][door.x] = TILE.EMPTY;
+    // ── Animate Opening Gates (one gate per opening; all tiles open together) ─
+    for (const gate of gates) {
+        if (gate.opening && gate.openProgress < 1) {
+            gate.openProgress += dt / DOOR_OPEN_DURATION;
+            if (gate.openProgress >= 1) {
+                gate.openProgress = 1;
+                gate.open = true;
+                gate.opening = false;
+                for (const t of gate.tiles) {
+                    grid[t.y][t.x] = TILE.EMPTY;
+                }
             }
         }
     }
@@ -208,11 +208,8 @@ export function update(state) {
             state.flags.area1Cleared = true;
             pushMessage(state, 'GATE UNLOCKED', 2);
 
-            // Unlock all button-locked doors
-            for (const key in doors) {
-                if (doors[key].lockType === 'button') {
-                    doors[key].locked = false;
-                }
+            for (const gate of gates) {
+                if (gate.lockType === 'button') gate.locked = false;
             }
         }
         return;

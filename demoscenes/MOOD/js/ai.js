@@ -13,7 +13,7 @@
  */
 
 import {
-    isSolid, getRoomId, doors, getMapWidth, getMapHeight,
+    isSolid, getRoomId, doors, gates, getMapWidth, getMapHeight,
     PICKUP_POSITIONS, INTERACTABLE_POSITIONS, ROOM_BOUNDS,
 } from './map.js';
 import { TILE, INTERACTION_RANGE, INTERACTION_ANGLE, PLAYER_RADIUS, MOUSE_SENSITIVITY } from './config.js';
@@ -163,6 +163,11 @@ function bfsPath(sx, sy, ex, ey) {
 
 const PATH_CACHE_TTL = 0.5;
 let pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, time: -1 };
+let lastCachedStepIndex = -2;
+
+function invalidatePathCache() {
+    pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, time: -1 };
+}
 
 /** Path from player to goal; uses approach tile for doors/interact. Caches result for PATH_CACHE_TTL sec. */
 function getPathToGoal(state, goal) {
@@ -173,7 +178,7 @@ function getPathToGoal(state, goal) {
     const sy = Math.floor(py);
     let ex, ey;
     if (goal.type === 'door' && goal.door) {
-        const a = getApproachTile(goal.door.x + 0.5, goal.door.y + 0.5, px, py);
+        const a = getApproachTile(goal.door.cx, goal.door.cy, px, py);
         ex = a.x; ey = a.y;
     } else if (goal.action === 'interact') {
         const a = getApproachTile(goal.x, goal.y, px, py);
@@ -244,20 +249,17 @@ function canOpenDoor(state, door) {
     return false;
 }
 
-/** Nearest closed door we can open, within range, or null. */
+/** Nearest closed gate we can open, within range, or null. One goal per opening. */
 function getNearestClosedDoor(state, maxRange = 6) {
     const p = state.player;
     let best = null;
     let bestDist = Infinity;
-    for (const key of Object.keys(doors)) {
-        const d = doors[key];
-        if (!canOpenDoor(state, d)) continue;
-        const cx = d.x + 0.5;
-        const cy = d.y + 0.5;
-        const dist = distanceTo(p.x, p.y, cx, cy);
+    for (const gate of gates) {
+        if (!canOpenDoor(state, gate)) continue;
+        const dist = distanceTo(p.x, p.y, gate.cx, gate.cy);
         if (dist > maxRange || dist >= bestDist) continue;
         bestDist = dist;
-        best = { door: d, x: cx, y: cy };
+        best = { door: gate, x: gate.cx, y: gate.cy };
     }
     return best;
 }
@@ -312,6 +314,16 @@ function getCurrentGoal(state) {
 
 // ── Steering ─────────────────────────────────────────────────────────
 
+/** When path to goal is null, steer toward nearest closed door so we don't sit stuck. */
+function getFallbackSteerTarget(state) {
+    const doorGoal = getNearestClosedDoor(state, 12);
+    if (!doorGoal) return null;
+    const px = state.player.x;
+    const py = state.player.y;
+    const a = getApproachTile(doorGoal.x, doorGoal.y, px, py);
+    return { x: a.x + 0.5, y: a.y + 0.5 };
+}
+
 /** Pick (tx, ty) to steer toward: next path step, or goal if no path / combat. */
 function getSteerTarget(state, goal) {
     const p = state.player;
@@ -319,11 +331,15 @@ function getSteerTarget(state, goal) {
         return { x: goal.x, y: goal.y };
     }
     const path = getPathToGoal(state, goal);
-    if (!path || path.length <= 1) return { x: goal.x, y: goal.y };
-    for (let i = 1; i < path.length; i++) {
-        const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
-        if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) return { x: cx, y: cy };
+    if (path && path.length > 1) {
+        for (let i = 1; i < path.length; i++) {
+            const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
+            if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) return { x: cx, y: cy };
+        }
+        return { x: goal.x, y: goal.y };
     }
+    const fallback = getFallbackSteerTarget(state);
+    if (fallback) return fallback;
     return { x: goal.x, y: goal.y };
 }
 
@@ -430,13 +446,17 @@ export function update(state) {
     const inp = state.ai.input;
     resetAiInput(inp);
 
+    const stepIndex = getCurrentScriptedStepIndex(state);
+    if (stepIndex !== lastCachedStepIndex) {
+        invalidatePathCache();
+        lastCachedStepIndex = stepIndex;
+    }
+
     const goal = getCurrentGoal(state);
     if (goal) {
         steerToward(state, goal);
         performAction(state, goal);
     }
-
-    const stepIndex = getCurrentScriptedStepIndex(state);
     const route = getScriptedRoute();
     const stepLabel = stepIndex >= 0 ? route[stepIndex].label : null;
 

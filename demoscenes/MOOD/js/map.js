@@ -320,63 +320,91 @@ export const PLAYER_SPAWN = {
     angle: 0, // facing east (positive X direction)
 };
 
-// ── Door State Tracking ─────────────────────────────────────────────
-// Keyed by "x,y". Created for every door tile on the grid.
-export const doors = {};
+// ── Passages: Doors (1 tile) and Gates (2+ tiles) ────────────────────
+// One backend object per opening. Door = single-tile opening; gate = multi-tile.
+// Visual and collision: one object spans the full width of the gap; one interaction opens it.
+// doors["x,y"] → passage (same object for every tile in that opening). gates[] = list of all.
+export const doors = {};   // tile key "x,y" → passage object
+export const gates = [];   // list of all passages (for animation, AI, iteration)
 
-function registerDoor(x, y, locked, lockType) {
-    doors[`${x},${y}`] = {
-        x, y,
+function registerPassage(tiles, locked, lockType) {
+    const list = Array.isArray(tiles[0]) ? tiles : tiles.map((t) => ({ x: t.x, y: t.y }));
+    const kind = list.length === 1 ? 'door' : 'gate';
+    const cx = list.reduce((s, t) => s + t.x, 0) / list.length + 0.5;
+    const cy = list.reduce((s, t) => s + t.y, 0) / list.length + 0.5;
+    const passage = {
+        kind,
+        tiles: list,
+        cx, cy,
         open: false,
         opening: false,
-        locked: locked,
-        lockType: lockType, // 'button' | 'key' | null
+        locked: locked ?? false,
+        lockType: lockType ?? null,
         openProgress: 0,
     };
+    gates.push(passage);
+    for (const t of list) {
+        doors[`${t.x},${t.y}`] = passage;
+    }
 }
 
-/** Reset all doors to closed (for regression tests). */
+/** Register a single-tile door. Use for 1-wide openings. */
+export function registerDoor(x, y, locked, lockType) {
+    registerPassage([{ x, y }], locked, lockType);
+}
+
+/** Register a multi-tile gate. Use for openings 2+ tiles wide. */
+function registerGate(tiles, locked, lockType) {
+    registerPassage(tiles, locked, lockType);
+}
+
+/** Reset all passages (doors and gates) to closed. */
 export function resetDoors() {
-    for (const key of Object.keys(doors)) {
-        const d = doors[key];
-        d.open = false;
-        d.opening = false;
-        d.openProgress = 0;
+    for (const g of gates) {
+        g.open = false;
+        g.opening = false;
+        g.openProgress = 0;
     }
 }
 
-/** Open all doors (for regression tests). */
+/** Open all passages (for regression tests). */
 export function openAllDoors() {
-    for (const key of Object.keys(doors)) {
-        const d = doors[key];
-        d.open = true;
-        d.opening = false;
-        d.openProgress = 1;
+    for (const g of gates) {
+        g.open = true;
+        g.opening = false;
+        g.openProgress = 1;
     }
 }
 
-// Register doors
-for (let y = HALL_01_Y; y < HALL_01_Y + HALL_01_H; y++) {
-    registerDoor(DOOR_01_X, y, false, null);                               // Area 0 → hallway
-}
-for (let x = GATE_X - 1; x <= GATE_X + 1; x++) {
-    registerDoor(x, GATE_Y, true, 'button');                               // Area 1 → Area 2 (locked)
-}
-for (let y = HALL_R1R2_Y; y < HALL_R1R2_Y + HALL_R1R2_H; y++) {
-    registerDoor(A2R1_X, y, false, null);                                  // a2r1 → a2r2 hallway
-}
-for (let x = HALL_R1R3_X; x < HALL_R1R3_X + HALL_R1R3_W; x++) {
-    registerDoor(x, A2R1_Y + A2R1_H, false, null);                         // a2r1 → a2r3 hallway
-}
-for (let y = HALL_R3R4_Y; y < HALL_R3R4_Y + HALL_R3R4_H; y++) {
-    registerDoor(A2R3_X + A2R3_W, y, false, null);                         // a2r3 → a2r4 hallway
-}
-for (let x = HALL_R3R5_X; x < HALL_R3R5_X + HALL_R3R5_W; x++) {
-    registerDoor(x, A2R3_Y + A2R3_H, false, null);                         // a2r3 → a2r5 hallway
-}
-for (let x = KEYDOOR_X - 1; x <= KEYDOOR_X + 1; x++) {
-    registerDoor(x, KEYDOOR_Y, true, 'key');                               // a2r5 → Area 3 (key locked)
-}
+// One passage per opening: door = 1 tile, gate = 2+ tiles
+registerGate(
+    [...Array(HALL_01_H)].map((_, i) => ({ x: DOOR_01_X, y: HALL_01_Y + i })),
+    false, null
+);
+registerGate(
+    [...Array(3)].map((_, i) => ({ x: GATE_X - 1 + i, y: GATE_Y })),
+    true, 'button'
+);
+registerGate(
+    [...Array(HALL_R1R2_H)].map((_, i) => ({ x: A2R1_X, y: HALL_R1R2_Y + i })),
+    false, null
+);
+registerGate(
+    [...Array(HALL_R1R3_W)].map((_, i) => ({ x: HALL_R1R3_X + i, y: A2R1_Y + A2R1_H })),
+    false, null
+);
+registerGate(
+    [...Array(HALL_R3R4_H)].map((_, i) => ({ x: A2R3_X + A2R3_W, y: HALL_R3R4_Y + i })),
+    false, null
+);
+registerGate(
+    [...Array(HALL_R3R5_W)].map((_, i) => ({ x: HALL_R3R5_X + i, y: A2R3_Y + A2R3_H })),
+    false, null
+);
+registerGate(
+    [...Array(3)].map((_, i) => ({ x: KEYDOOR_X - 1 + i, y: KEYDOOR_Y })),
+    true, 'key'
+);
 
 // ── Public API ──────────────────────────────────────────────────────
 

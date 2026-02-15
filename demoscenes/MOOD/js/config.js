@@ -141,6 +141,8 @@ export const HUE_ROTATE_SPEED = 0.02;      // degrees per ms
 export const BREATHING_AMPLITUDE = 0.025;   // ±2.5% wall height
 export const BREATHING_SPEED = 0.001;       // sin() frequency multiplier
 export const PROJECTILE_TRAIL_LENGTH = 3;   // number of trail positions
+/** Door/gate recess: apparent depth in tiles so panels look set into the wall from both sides. */
+export const DOOR_RECESS_DEPTH = 0.12;
 
 // ── Projection (derived) ───────────────────────────────────────────
 export const PROJECTION_PLANE = INTERNAL_WIDTH / (2 * Math.tan(PLAYER_FOV / 2));
