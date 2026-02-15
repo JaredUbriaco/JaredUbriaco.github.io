@@ -87,6 +87,7 @@ const NULL_PATH_STUCK_THRESHOLD = 0.8;    // if path is null for this long (nav 
 const INTERACT_NULL_PATH_SAFE_DIST = 6;   // within this many tiles of door/button, never replan for null path (just walk there)
 const DOOR_STUCK_TIME = 6;               // at door in range AND facing, this long without opening → backup and re-approach
 const STUCK_APPROACHING_INTERACT = 3;    // approaching door/button but not in range and no progress this long → backup (escape corner)
+const NEAR_TARGET_NO_REPLAN_DIST = 2;    // within this many tiles of goal: don't trigger stuck/replan (just walk to it)
 const DOOR_FALLBACK_AFTER_ATTEMPTS = 5;   // after this many door backup cycles, log FAILURE/FALLBACK
 
 // ── List of goals (scripted route from ai-route framework + level data) ─
@@ -503,6 +504,19 @@ function pathSegmentCentroid(path, idx, window) {
     return { x: sx / n, y: sy / n };
 }
 
+/** Nudge (x,y) away from adjacent walls so we don't steer into edges. One tile = 1 unit. */
+function nudgeAwayFromWalls(x, y, amount) {
+    amount = amount ?? 0.4;
+    const tx = Math.floor(x), ty = Math.floor(y);
+    let dx = 0, dy = 0;
+    if (isSolid(tx + 1, ty)) dx -= amount;
+    if (isSolid(tx - 1, ty)) dx += amount;
+    if (isSolid(tx, ty + 1)) dy -= amount;
+    if (isSolid(tx, ty - 1)) dy += amount;
+    if (dx === 0 && dy === 0) return { x, y };
+    return { x: x + dx, y: y + dy };
+}
+
 /** Pick (tx, ty) to steer toward. Uses look-ahead when we have LOS; target is centroid of next PATH_CENTROID_WINDOW nodes so bot walks down the middle. */
 function getSteerTarget(state, goal) {
     const p = state.player;
@@ -531,7 +545,8 @@ function getSteerTarget(state, goal) {
             }
         }
         const centroid = pathSegmentCentroid(path, bestIdx, PATH_CENTROID_WINDOW);
-        return centroid || { x: path[bestIdx].x + 0.5, y: path[bestIdx].y + 0.5 };
+        const raw = centroid || { x: path[bestIdx].x + 0.5, y: path[bestIdx].y + 0.5 };
+        return nudgeAwayFromWalls(raw.x, raw.y);
     };
     if (isInteractGoal(goal)) {
         const approachCenter = getInteractApproachCenter(goal, p.x, p.y);
@@ -618,6 +633,11 @@ function steerToward(state, goal) {
             ? distanceTo(p.x, p.y, goal.door.cx, goal.door.cy) <= INTERACTION_RANGE
             : distanceTo(p.x, p.y, goal.x, goal.y) <= INTERACTION_RANGE);
         const atWaypoint = distToTarget < PATH_REACH_DIST * 2 || atDoorInRange;
+        const nearTargetNoReplan = distToTarget < NEAR_TARGET_NO_REPLAN_DIST;
+        if (nearTargetNoReplan) {
+            ai._stuckNoProgressTime = 0;
+            ai._stuckApproachingInteractTime = 0;
+        }
         const lastDist = ai._lastSteerTargetDist;
         // For interact goals, also count progress toward the interaction point (door/button), not just steer target.
         const isInteract = isInteractGoal(goal);
@@ -801,6 +821,13 @@ export function update(state) {
 
     const inp = state.ai.input;
     resetAiInput(inp);
+
+    // Sticky enter_room: record when we're in each room so we stay "done" for 3s after leaving (avoids step flip on backup)
+    const room = getRoomId(state.player.x, state.player.y);
+    if (room) {
+        if (!state.ai._enteredRoomAt) state.ai._enteredRoomAt = {};
+        state.ai._enteredRoomAt[room] = state.time.elapsed || 0;
+    }
 
     const stepIndex = getEffectiveCurrentStepIndex(state);
     state.ai._effectiveStepIndex = stepIndex; // cache for this frame so getCurrentGoal/getPathToGoal don't recompute

@@ -93,7 +93,13 @@ function buildDoneWhen(step, levelData, worldApi) {
                 !!(step.flagName && s.flags && s.flags[step.flagName]) ||
                 (step.pastRoomId && past(s, step.pastRoomId));
         case 'enter_room':
-            return (s) => roomClear(s, step.roomId) || (step.roomId && past(s, step.roomId));
+            // Sticky: once we've been in the room, stay "done" for a few sec after leaving (e.g. backup) so we don't flip step back
+            return (s) => {
+                if (roomClear(s, step.roomId) || (step.roomId && past(s, step.roomId))) return true;
+                const stamp = s.ai && s.ai._enteredRoomAt && step.roomId && s.ai._enteredRoomAt[step.roomId];
+                const elapsed = s.time && s.time.elapsed != null ? s.time.elapsed : 0;
+                return stamp != null && (elapsed - stamp) < 3;
+            };
         case 'waypoint':
             return (s) => step.flagName && s.flags && s.flags[step.flagName];
         default:
