@@ -4,6 +4,17 @@ Scripted route **data** for the ai-route framework: a **list of goals** in order
 
 **Universal rule:** A door or gate that can no longer be interacted with (already open) is never a valid goal. The engine skips such steps when choosing the current goal, so the AI never goes back to an open door or spins there.
 
+## Engine behavior (BFS and steering)
+
+The way the AI chooses goals, moves, and interacts is **the same for every level**. The engine (ai.js) follows the contract in **BFS-AND-STEERING.md** in this folder. In short:
+
+- **Goal:** Enemy with LOS first; if current step is a door and enemy has no LOS, prefer opening the door; then first undone scripted step (open doors are never chosen).
+- **Movement:** For **any** door or interact (button, pickup), the bot never moves toward the interact point itself (it may be solid). It moves only to the **approach tile** (adjacent walkable tile). So every door and every button works the same.
+- **Aim:** When in range of a door or interact, the bot aims at it to press E; movement target stays the approach tile.
+- **Stuck:** If the bot makes no progress or has no path for a short time, it backs up and replans (for any step).
+
+Level files only supply **data** (steps, roomOrder, positions). They do not need step-specific steering or BFS logic.
+
 ## Adding a new level
 
 1. **Create a level file** (e.g. `mood-level2.js`) that exports:

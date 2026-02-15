@@ -5,6 +5,9 @@
  * BFS pathfind on the tile grid (go around walls/pillars), steer toward
  * the next path step, interact when in range. One loop: goal → path → steer → act.
  *
+ * Engine contract (goal validity, steer target, BFS, stuck recovery) is defined
+ * once for all levels in levels/BFS-AND-STEERING.md. No step-specific logic.
+ *
  * Combat: enemy in LOS → goal = enemy. We turn toward them and may advance until
  * within combatNoAdvanceDist; then we STOP moving and only turn + fire (avoids
  * point-blank "dance"). Fire when aim within combatFacingTolerance; if enemy
@@ -356,12 +359,43 @@ function getCurrentGoal(state) {
 }
 
 // ── Steering ─────────────────────────────────────────────────────────
+// See levels/BFS-AND-STEERING.md: for any door or interact goal, steer target is always
+// the approach tile (never the interact point, which may be solid). Same logic for all levels.
 
-/** Pick (tx, ty) to steer toward: next path step, or goal. Never steer toward a different goal when path is null — stick to current goal (forward-only). */
+/** True if goal requires standing at an approach tile to interact (door, button, pickup, etc.). */
+function isInteractGoal(goal) {
+    return (goal.type === 'door' && goal.door) || goal.action === 'interact';
+}
+
+/** Approach tile center for an interact goal. Never returns the door/interact point (solid). */
+function getInteractApproachCenter(goal, px, py) {
+    if (goal.type === 'door' && goal.door) {
+        const a = getApproachTile(goal.door.cx, goal.door.cy, px, py);
+        return { x: a.x + 0.5, y: a.y + 0.5 };
+    }
+    if (goal.action === 'interact') {
+        const a = getApproachTile(goal.x, goal.y, px, py);
+        return { x: a.x + 0.5, y: a.y + 0.5 };
+    }
+    return { x: goal.x, y: goal.y };
+}
+
+/** Pick (tx, ty) to steer toward: next path step, or goal. Never steer into solid (see BFS-AND-STEERING.md). */
 function getSteerTarget(state, goal) {
     const p = state.player;
     if (goal.type === 'enemy' || goal.action === 'fire') {
         return { x: goal.x, y: goal.y };
+    }
+    if (isInteractGoal(goal)) {
+        const approach = getInteractApproachCenter(goal, p.x, p.y);
+        const path = getPathToGoal(state, goal);
+        if (path && path.length > 1) {
+            for (let i = 1; i < path.length; i++) {
+                const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
+                if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) return { x: cx, y: cy };
+            }
+        }
+        return approach;
     }
     const path = getPathToGoal(state, goal);
     if (path && path.length > 1) {
@@ -370,15 +404,6 @@ function getSteerTarget(state, goal) {
             if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) return { x: cx, y: cy };
         }
         return { x: goal.x, y: goal.y };
-    }
-    // Path null or length 1: keep current goal (e.g. door we're at while it opens). Do not fall back to "nearest closed door" — that would send us backward.
-    if (goal.type === 'door' && goal.door) {
-        const a = getApproachTile(goal.door.cx, goal.door.cy, p.x, p.y);
-        return { x: a.x + 0.5, y: a.y + 0.5 };
-    }
-    if (goal.action === 'interact') {
-        const a = getApproachTile(goal.x, goal.y, p.x, p.y);
-        return { x: a.x + 0.5, y: a.y + 0.5 };
     }
     return { x: goal.x, y: goal.y };
 }
@@ -389,7 +414,15 @@ function steerToward(state, goal) {
     const p = state.player;
     const inp = state.ai.input;
     const target = getSteerTarget(state, goal);
-    const wantAngle = angleTo(p.x, p.y, target.x, target.y);
+    // For any interact goal: when in range, aim at the interact point so we can press E (movement stays approach tile)
+    const interactAim = isInteractGoal(goal)
+        && (goal.door
+            ? distanceTo(p.x, p.y, goal.door.cx, goal.door.cy) <= INTERACTION_RANGE
+            : distanceTo(p.x, p.y, goal.x, goal.y) <= INTERACTION_RANGE);
+    const aimAt = interactAim
+        ? (goal.door ? { x: goal.door.cx, y: goal.door.cy } : { x: goal.x, y: goal.y })
+        : target;
+    const wantAngle = angleTo(p.x, p.y, aimAt.x, aimAt.y);
     const angleDiff = normalizeAngle(wantAngle - p.angle);
     const distToTarget = distanceTo(p.x, p.y, target.x, target.y);
     const elapsed = state.time.elapsed || 0;
