@@ -479,6 +479,7 @@ function startGame(fromClick) {
 
 btnStart.addEventListener('click', (e) => {
     e.stopPropagation();
+    audio.initFromUserGesture();
     startGame(true);
 });
 
@@ -501,6 +502,7 @@ window.addEventListener('keydown', (e) => {
 
 // If pointer lock is lost and game isn't paused, clicking canvas re-locks
 canvas.addEventListener('click', () => {
+    audio.initFromUserGesture(); // user gesture allows AudioContext if not yet started
     if (state.flags.started && !state.flags.paused && !input.isPointerLocked()) {
         input.requestLock(canvas);
     }

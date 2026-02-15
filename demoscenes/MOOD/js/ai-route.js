@@ -93,7 +93,7 @@ function buildDoneWhen(step, levelData, worldApi) {
                 !!(step.flagName && s.flags && s.flags[step.flagName]) ||
                 (step.pastRoomId && past(s, step.pastRoomId));
         case 'enter_room':
-            return (s) => roomClear(s, step.roomId);
+            return (s) => roomClear(s, step.roomId) || (step.roomId && past(s, step.roomId));
         case 'waypoint':
             return (s) => step.flagName && s.flags && s.flags[step.flagName];
         default:

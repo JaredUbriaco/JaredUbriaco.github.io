@@ -132,7 +132,7 @@ const HALL_12_Y = GATE_Y + 1;
 const HALL_12_W = 3;
 const HALL_12_H = 4;
 fillRect(HALL_12_X, HALL_12_Y, HALL_12_W, HALL_12_H, TILE.EMPTY);
-tagRoom(HALL_12_X, HALL_12_Y, HALL_12_W, HALL_12_H, 'area1'); // gate corridor still "area1" so we don't get room=null and step flip
+tagRoom(HALL_12_X, HALL_12_Y, HALL_12_W, HALL_12_H, 'a2r1'); // gate corridor counts as a2r1 so we don't flip step when crossing area1↔a2r1
 
 // ══════════════════════════════════════════════════════════════════════
 // AREA 2 ROOM 1 — HALL OF ECHOES (12×8, south of gate hallway)

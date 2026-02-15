@@ -83,6 +83,11 @@ function init() {
     }
 }
 
+/** Call from a user gesture (e.g. Start button click) so AudioContext is allowed to start. */
+export function initFromUserGesture() {
+    init();
+}
+
 // ── Sound Effects (one-shot) ────────────────────────────────────────
 
 function playOneShot(freq, type, duration, volume = 0.15) {
@@ -185,11 +190,8 @@ let lastCurrentRoom = null;
  * @param {object} state - Shared game state
  */
 export function update(state) {
-    // Lazy init (needs user gesture)
-    if (!initialized) {
-        init();
-        if (!initialized) return;
-    }
+    // Only run if context was already created from a user gesture (Start click)
+    if (!initialized || !ctx) return;
 
     // Resume context if suspended (autoplay policy)
     if (ctx.state === 'suspended') {
