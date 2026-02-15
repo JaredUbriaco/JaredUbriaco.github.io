@@ -16,7 +16,7 @@ export const moodLevel1 = {
         { type: 'button', label: 'button', id: 'area1Button', flagName: 'buttonPressed', pastRoomId: 'area1' },
         { type: 'door', label: 'gate_area2', doorKey: '19,15', pastRoomId: 'a2r1', position: { x: 19.5, y: 15.5 } },
         { type: 'enter_room', label: 'enter_a2r1', roomId: 'a2r1', positionOffset: { dy: -3 } }, // waypoint just inside north (entry) so we don't get stuck in corridor/alcoves
-        { type: 'door', label: 'door_a2r2', doorKey: '14,26', pastRoomId: 'a2r2', position: { x: 14.5, y: 26.5 } },
+        { type: 'door', label: 'door_a2r2', doorKey: '13,24', pastRoomId: 'a2r2', position: { x: 13.5, y: 24.5 } },
         { type: 'enter_room', label: 'enter_a2r2', roomId: 'a2r2', positionOffset: { dx: 2 } }, // entry from east (a2r1)
         { type: 'door', label: 'door_a2r1_a2r3', doorKey: '19,30', pastRoomId: 'a2r3', position: { x: 19.5, y: 30.5 } },
         { type: 'enter_room', label: 'enter_a2r3', roomId: 'a2r3', positionOffset: { dy: -5 } }, // entry from north (a2r1)
