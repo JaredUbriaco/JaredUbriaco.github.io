@@ -66,6 +66,11 @@ const NO_OVERSHOOT_FRAC = AI_TUNING.noOvershootFrac;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
 const COMBAT_RECENT_ENEMY_GRACE = 0.6; // Keep targeting enemy for this long without LOS so we don't rescans
 
+// Stuck recovery: when we don't make progress toward steer target for this long, back up and replan
+const STUCK_NO_PROGRESS_THRESHOLD = 1.2;  // seconds
+const STUCK_PROGRESS_MIN = 0.2;           // tiles improvement per check to count as progress
+const BACKUP_DURATION = 0.55;             // seconds to back up + wiggle when stuck
+
 // ── List of goals (scripted route from ai-route framework + level data) ─
 // Order: spawn → handgun → first door → next room → kill enemies → button → door → next room → …
 // Branching: clear room, then choose next door; repeat. Same logic for any level.
@@ -366,6 +371,54 @@ function steerToward(state, goal) {
     const wantAngle = angleTo(p.x, p.y, target.x, target.y);
     const angleDiff = normalizeAngle(wantAngle - p.angle);
     const distToTarget = distanceTo(p.x, p.y, target.x, target.y);
+    const elapsed = state.time.elapsed || 0;
+    const dt = state.time.dt != null ? state.time.dt : (1 / 60);
+
+    const isCombat = goal.type === 'enemy' || goal.action === 'fire';
+
+    // ── Stuck detection (navigation only): no progress toward steer target → back up and replan ──
+    if (!isCombat) {
+        const ai = state.ai;
+        const inBackupMode = ai._backUpUntil != null && elapsed < ai._backUpUntil;
+        if (inBackupMode) {
+            // Back up + strafe wiggle to escape corners; keep aiming at target
+            inp.moveBack = true;
+            inp.moveForward = false;
+            const wiggle = Math.floor(elapsed / 0.25) % 2;
+            inp.strafeLeft = wiggle === 0;
+            inp.strafeRight = wiggle === 1;
+            ai._lastSteerTargetDist = distToTarget;
+            if (Math.abs(angleDiff) > AIM_DEAD_ZONE) {
+                const turnGain = TURN_GAIN;
+                let lookDX = angleDiff * turnGain;
+                const maxTurnPerFrame = (Math.abs(angleDiff) * NO_OVERSHOOT_FRAC) / MOUSE_SENSITIVITY;
+                lookDX = Math.max(-maxTurnPerFrame, Math.min(maxTurnPerFrame, lookDX));
+                inp.lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, lookDX));
+            } else inp.lookDX = 0;
+            inp.lookDY = 0;
+            return;
+        }
+        const atWaypoint = distToTarget < PATH_REACH_DIST * 2;
+        const lastDist = ai._lastSteerTargetDist;
+        if (lastDist != null && !atWaypoint) {
+            const madeProgress = distToTarget < lastDist - STUCK_PROGRESS_MIN;
+            if (!madeProgress) {
+                ai._stuckNoProgressTime = (ai._stuckNoProgressTime || 0) + dt;
+                if (ai._stuckNoProgressTime >= STUCK_NO_PROGRESS_THRESHOLD) {
+                    invalidatePathCache();
+                    ai._backUpUntil = elapsed + BACKUP_DURATION;
+                    ai._stuckNoProgressTime = 0;
+                    ai._replanCount = (ai._replanCount || 0) + 1;
+                }
+            } else {
+                ai._stuckNoProgressTime = 0;
+            }
+        }
+        ai._lastSteerTargetDist = distToTarget;
+    } else {
+        state.ai._lastSteerTargetDist = distToTarget;
+        state.ai._stuckNoProgressTime = 0;
+    }
 
     // ── Aim: always turn toward target (like a player moving the mouse). Never stop aiming when we have a goal. ──
     if (Math.abs(angleDiff) <= AIM_DEAD_ZONE) {
@@ -381,7 +434,6 @@ function steerToward(state, goal) {
     inp.lookDY = 0;
 
     // ── Movement: allow any combination of forward/back/strafe (diagonal movement like W+A). ──
-    const isCombat = goal.type === 'enemy' || goal.action === 'fire';
     const inCombatStandoff = isCombat && distToTarget <= COMBAT_NO_ADVANCE_DIST;
 
     if (isCombat) {
@@ -503,10 +555,11 @@ export function update(state) {
         step: stepLabel,
         targetId: goal && goal.entity ? goal.entity.id : null,
         confidence: goal ? 1 : 0,
-        stuckTimer: 0,
-        replanCount: 0,
+        stuckTimer: state.ai._stuckNoProgressTime ?? 0,
+        replanCount: state.ai._replanCount ?? 0,
     };
 
+    const inBackup = state.ai._backUpUntil != null && (state.time.elapsed || 0) < state.ai._backUpUntil;
     state.ai.debug = {
         rawStepIndex,
         effectiveStepIndex: stepIndex,
@@ -518,6 +571,9 @@ export function update(state) {
         door_8_5_open: door0Open,
         door_8_5_progress: door0 ? door0.openProgress.toFixed(2) : '—',
         lastEnemyId: state.ai.lastEnemyTargetId,
+        stuckTimer: (state.ai._stuckNoProgressTime ?? 0).toFixed(2),
+        replanCount: state.ai._replanCount ?? 0,
+        backingUp: inBackup,
     };
 
     // Throttled console log (every ~2s) to trace regression without flooding

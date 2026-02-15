@@ -171,6 +171,7 @@ function updateDebug(dt) {
             `Room: ${d.roomId}  Goal: ${d.goalSummary}\n` +
             `Raw step: ${d.rawStepIndex}  Effective: ${d.effectiveStepIndex}  Step: ${d.stepLabel || '—'}\n` +
             `Door 8,5: open=${d.door_8_5_open} progress=${d.door_8_5_progress}\n` +
+            `Stuck: ${d.stuckTimer ?? '0'}  Replan: ${d.replanCount ?? 0}  BackingUp: ${d.backingUp ? 'YES' : 'no'}\n` +
             `Skipped: [${(d.skippedSteps || []).join(', ')}]\n` +
             `Last enemy id: ${d.lastEnemyId ?? '—'}`;
     } else if (state.ai.active && state.ai.telemetry && Object.keys(state.ai.telemetry).length > 0) {

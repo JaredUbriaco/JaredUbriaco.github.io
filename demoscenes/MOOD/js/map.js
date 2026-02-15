@@ -82,7 +82,7 @@ const HALL_01_W = 4;               // 4 tiles long
 const HALL_01_H = 3;               // 3 tiles wide
 
 fillRect(HALL_01_X, HALL_01_Y, HALL_01_W, HALL_01_H, TILE.EMPTY);
-// No room tag for corridors (null = no HUD label)
+tagRoom(HALL_01_X, HALL_01_Y, HALL_01_W, HALL_01_H, 'area1'); // corridor counts as area1 so AI step doesn't flip to "enter_area1" when crossing
 
 // Door between Area 0 and hallway
 const DOOR_01_X = HALL_01_X;
@@ -132,6 +132,7 @@ const HALL_12_Y = GATE_Y + 1;
 const HALL_12_W = 3;
 const HALL_12_H = 4;
 fillRect(HALL_12_X, HALL_12_Y, HALL_12_W, HALL_12_H, TILE.EMPTY);
+tagRoom(HALL_12_X, HALL_12_Y, HALL_12_W, HALL_12_H, 'area1'); // gate corridor still "area1" so we don't get room=null and step flip
 
 // ══════════════════════════════════════════════════════════════════════
 // AREA 2 ROOM 1 — HALL OF ECHOES (12×8, south of gate hallway)
@@ -154,6 +155,7 @@ const HALL_R1R2_Y = A2R1_Y + 3;
 const HALL_R1R2_W = 4;
 const HALL_R1R2_H = 3;
 fillRect(HALL_R1R2_X, HALL_R1R2_Y, HALL_R1R2_W, HALL_R1R2_H, TILE.EMPTY);
+tagRoom(HALL_R1R2_X, HALL_R1R2_Y, HALL_R1R2_W, HALL_R1R2_H, 'a2r1');
 // Door between r1 and hallway
 for (let y = HALL_R1R2_Y; y < HALL_R1R2_Y + HALL_R1R2_H; y++) {
     placeTile(A2R1_X, y, TILE.DOOR);
@@ -182,6 +184,7 @@ const HALL_R1R3_Y = A2R1_Y + A2R1_H;
 const HALL_R1R3_W = 3;
 const HALL_R1R3_H = 4;
 fillRect(HALL_R1R3_X, HALL_R1R3_Y, HALL_R1R3_W, HALL_R1R3_H, TILE.EMPTY);
+tagRoom(HALL_R1R3_X, HALL_R1R3_Y, HALL_R1R3_W, HALL_R1R3_H, 'a2r1');
 // Door
 for (let x = HALL_R1R3_X; x < HALL_R1R3_X + HALL_R1R3_W; x++) {
     placeTile(x, A2R1_Y + A2R1_H, TILE.DOOR);
@@ -208,6 +211,7 @@ const HALL_R3R4_Y = A2R3_Y + 5;
 const HALL_R3R4_W = 4;
 const HALL_R3R4_H = 3;
 fillRect(HALL_R3R4_X, HALL_R3R4_Y, HALL_R3R4_W, HALL_R3R4_H, TILE.EMPTY);
+tagRoom(HALL_R3R4_X, HALL_R3R4_Y, HALL_R3R4_W, HALL_R3R4_H, 'a2r3');
 for (let y = HALL_R3R4_Y; y < HALL_R3R4_Y + HALL_R3R4_H; y++) {
     placeTile(A2R3_X + A2R3_W, y, TILE.DOOR);
 }
@@ -233,6 +237,7 @@ const HALL_R3R5_Y = A2R3_Y + A2R3_H;
 const HALL_R3R5_W = 3;
 const HALL_R3R5_H = 4;
 fillRect(HALL_R3R5_X, HALL_R3R5_Y, HALL_R3R5_W, HALL_R3R5_H, TILE.EMPTY);
+tagRoom(HALL_R3R5_X, HALL_R3R5_Y, HALL_R3R5_W, HALL_R3R5_H, 'a2r3');
 for (let x = HALL_R3R5_X; x < HALL_R3R5_X + HALL_R3R5_W; x++) {
     placeTile(x, A2R3_Y + A2R3_H, TILE.DOOR);
 }
