@@ -26,7 +26,6 @@ import {
     isSolid, getRoomId, doors, gates, getMapWidth, getMapHeight,
 } from './map.js';
 import { TILE, INTERACTION_RANGE, INTERACTION_ANGLE, PLAYER_RADIUS, MOUSE_SENSITIVITY } from './config.js';
-import { getCurrentObjectiveTask } from './objectives.js';
 import { angleTo, distanceTo, normalizeAngle } from './utils.js';
 import {
     buildRoute, getCurrentScriptedStepIndex as getRouteStepIndex,
@@ -120,7 +119,18 @@ function getEffectiveCurrentStepIndex(state) {
             skipReasons.push(`${i}:${step.label}(done)`);
             continue;
         }
-        if (step.doorKey && doors[step.doorKey] && doors[step.doorKey].openProgress >= 1) {
+        if (step.doorKey && !doors[step.doorKey]) {
+            skipReasons.push(`${i}:${step.label}(door missing)`);
+            if (!state.ai._warnedMissingDoor) {
+                state.ai._warnedMissingDoor = new Set();
+            }
+            if (!state.ai._warnedMissingDoor.has(step.doorKey)) {
+                console.warn('[AI] Step "' + (step.label || i) + '" has doorKey "' + step.doorKey + '" but door not in world; skipping step.');
+                state.ai._warnedMissingDoor.add(step.doorKey);
+            }
+            continue;
+        }
+        if (step.doorKey && doors[step.doorKey].openProgress >= 1) {
             skipReasons.push(`${i}:${step.label}(door open)`);
             continue;
         }
@@ -187,7 +197,9 @@ function bfsPath(sx, sy, ex, ey) {
     return null;
 }
 
-/** Smooth path by string-pulling: keep only nodes we have LOS through (cut corners). Fewer waypoints = smoother ground path. */
+/** Smooth path by string-pulling: keep only nodes we have LOS through (cut corners). Fewer waypoints = smoother ground path.
+ * Known limitation: LOS is a thin ray; we do not account for player radius. A cut corner can occasionally be too tight;
+ * stuck detection will backup and replan if the bot gets stuck. See BFS-AND-STEERING.md. */
 function smoothPath(path) {
     if (!path || path.length <= 2) return path;
     const out = [path[0]];
@@ -216,7 +228,7 @@ function invalidatePathCache() {
 
 /** Path from player to goal; uses approach tile for doors/interact. Caches by (sx,sy,ex,ey,stepIndex) so we never reuse a path from a different scripted step. */
 function getPathToGoal(state, goal) {
-    const stepIndex = getEffectiveCurrentStepIndex(state);
+    const stepIndex = state.ai._effectiveStepIndex ?? getEffectiveCurrentStepIndex(state);
     const px = state.player.x;
     const py = state.player.y;
     const elapsed = state.time.elapsed || 0;
@@ -354,7 +366,7 @@ function isInRangeAndFacing(px, py, pAngle, tx, ty, angleTolerance = INTERACTION
  */
 function getCurrentGoal(state) {
     const p = state.player;
-    const stepIndex = getEffectiveCurrentStepIndex(state);
+    const stepIndex = state.ai._effectiveStepIndex ?? getEffectiveCurrentStepIndex(state);
     const route = getScriptedRoute();
     const currentStep = stepIndex >= 0 ? route[stepIndex] : null;
     const isDoorStep = currentStep && currentStep.doorKey;
@@ -701,6 +713,7 @@ export function update(state) {
     resetAiInput(inp);
 
     const stepIndex = getEffectiveCurrentStepIndex(state);
+    state.ai._effectiveStepIndex = stepIndex; // cache for this frame so getCurrentGoal/getPathToGoal don't recompute
     if (stepIndex !== lastCachedStepIndex) {
         const prevStep = lastCachedStepIndex >= 0 ? getScriptedRoute()[lastCachedStepIndex] : null;
         if (prevStep && prevStep.doorKey) {
@@ -714,6 +727,13 @@ export function update(state) {
     }
 
     const goal = getCurrentGoal(state);
+
+    if (goal && goal.action === 'interact' && goal.x === 0 && goal.y === 0) {
+        if (!state.ai._warnedInteractZero) {
+            state.ai._warnedInteractZero = true;
+            console.warn('[AI] Interact goal has position (0,0); likely missing getInteractable(id) or position in level data.');
+        }
+    }
 
     if (stepIndex < 0 && goal === null) {
         const room = getRoomId(state.player.x, state.player.y);

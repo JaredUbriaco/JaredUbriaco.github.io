@@ -138,6 +138,7 @@ export function buildRoute(levelData, worldApi) {
         const pos = resolvePosition(desc, worldApi);
         const doneWhen = buildDoneWhen(desc, levelData, worldApi);
         const step = {
+            type: desc.type,
             label: desc.label,
             x: pos.x,
             y: pos.y,
