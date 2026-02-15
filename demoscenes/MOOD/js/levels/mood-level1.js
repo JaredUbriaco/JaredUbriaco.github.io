@@ -18,7 +18,7 @@ export const moodLevel1 = {
         { type: 'enter_room', label: 'enter_a2r1', roomId: 'a2r1', positionOffset: { dy: -3 } }, // waypoint just inside north (entry) so we don't get stuck in corridor/alcoves
         { type: 'door', label: 'door_a2r2', doorKey: '13,24', pastRoomId: 'a2r2', position: { x: 13.5, y: 24.5 } },
         { type: 'enter_room', label: 'enter_a2r2', roomId: 'a2r2', positionOffset: { dx: 2 } }, // entry from east (a2r1)
-        { type: 'door', label: 'door_a2r1_a2r3', doorKey: '19,30', pastRoomId: 'a2r3', position: { x: 19.5, y: 30.5 } },
+        { type: 'door', label: 'door_a2r1_a2r3', doorKey: '18,28', pastRoomId: 'a2r3', position: { x: 18.5, y: 28.5 } },
         { type: 'enter_room', label: 'enter_a2r3', roomId: 'a2r3', positionOffset: { dy: -5 } }, // entry from north (a2r1)
         { type: 'door', label: 'door_a2r4', doorKey: '31,36', pastRoomId: 'a2r4', position: { x: 31.5, y: 36.5 } },
         { type: 'pickup', label: 'shotgun', id: 'shotgun', weaponId: 'SHOTGUN', pastRoomId: 'a2r4' },

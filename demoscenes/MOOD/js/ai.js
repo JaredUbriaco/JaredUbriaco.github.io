@@ -128,7 +128,7 @@ function getEffectiveCurrentStepIndex(state) {
                 for (const g of gates) {
                     for (const t of g.tiles) {
                         const cx = t.x + 0.5, cy = t.y + 0.5;
-                        if (Math.abs(cx - sx) <= 1.5 && Math.abs(cy - sy) <= 1.5) {
+                        if (Math.abs(cx - sx) <= 2.5 && Math.abs(cy - sy) <= 2.5) {
                             step.doorKey = `${t.x},${t.y}`;
                             break;
                         }
