@@ -72,7 +72,8 @@ const COMBAT_POINT_BLANK_DIST = AI_TUNING.combatPointBlankDist;
 const AIM_DEAD_ZONE = AI_TUNING.aimDeadZone;
 const NO_OVERSHOOT_FRAC = AI_TUNING.noOvershootFrac;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
-const LOOK_AHEAD_TILES = 7; // When we have clear LOS, steer toward a point this far along the path (human-like: run toward goal until in range)
+const LOOK_AHEAD_TILES = 7; // Interact goals: steer toward point this far along path when we have LOS
+const LOOK_AHEAD_TILES_NAV = 3; // Waypoint/enter_room: short look-ahead so we follow path step-by-step and don't aim through walls/doors
 const PATH_CENTROID_WINDOW = 5; // Steer at centroid of this many path nodes so bot walks down the middle, not along the wall
 const COMBAT_RECENT_ENEMY_GRACE = 1.2; // Keep targeting enemy for this long without LOS so we don't rescans
 const COMBAT_SWITCH_CLOSER_TILES = 2;  // Only switch to a different visible enemy if they're this many tiles closer
@@ -518,49 +519,51 @@ function nudgeAwayFromWalls(x, y, amount) {
     return { x: x + dx, y: y + dy };
 }
 
-/** Pick (tx, ty) to steer toward. Uses look-ahead when we have LOS; target is centroid of next PATH_CENTROID_WINDOW nodes so bot walks down the middle. */
+/** Pick (tx, ty) to steer toward. maxLookAhead: for waypoint goals use 3 so we follow path step-by-step and don't aim through walls. */
+function pickFromPath(path, p, useLookAhead, maxLookAhead) {
+    const look = maxLookAhead ?? LOOK_AHEAD_TILES;
+    if (!path || path.length <= 1) return null;
+    let firstUnreached = -1;
+    for (let i = 1; i < path.length; i++) {
+        const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
+        if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) {
+            firstUnreached = i;
+            break;
+        }
+    }
+    if (firstUnreached < 0) return null;
+    let bestIdx = firstUnreached;
+    if (useLookAhead) {
+        for (let i = firstUnreached + 1; i < path.length; i++) {
+            const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
+            const dist = distanceTo(p.x, p.y, cx, cy);
+            if (dist <= look && hasLineOfSight(p.x, p.y, cx, cy)) bestIdx = i;
+            else break;
+        }
+    }
+    const centroid = pathSegmentCentroid(path, bestIdx, PATH_CENTROID_WINDOW);
+    const raw = centroid || { x: path[bestIdx].x + 0.5, y: path[bestIdx].y + 0.5 };
+    return nudgeAwayFromWalls(raw.x, raw.y);
+}
+
 function getSteerTarget(state, goal) {
     const p = state.player;
     if (goal.type === 'enemy' || goal.action === 'fire') {
         return { x: goal.x, y: goal.y };
     }
     const path = getPathToGoal(state, goal);
-    const pickFromPath = (path, useLookAhead) => {
-        if (!path || path.length <= 1) return null;
-        let firstUnreached = -1;
-        for (let i = 1; i < path.length; i++) {
-            const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
-            if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) {
-                firstUnreached = i;
-                break;
-            }
-        }
-        if (firstUnreached < 0) return null;
-        let bestIdx = firstUnreached;
-        if (useLookAhead) {
-            for (let i = firstUnreached + 1; i < path.length; i++) {
-                const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
-                const dist = distanceTo(p.x, p.y, cx, cy);
-                if (dist <= LOOK_AHEAD_TILES && hasLineOfSight(p.x, p.y, cx, cy)) bestIdx = i;
-                else break;
-            }
-        }
-        const centroid = pathSegmentCentroid(path, bestIdx, PATH_CENTROID_WINDOW);
-        const raw = centroid || { x: path[bestIdx].x + 0.5, y: path[bestIdx].y + 0.5 };
-        return nudgeAwayFromWalls(raw.x, raw.y);
-    };
     if (isInteractGoal(goal)) {
         const approachCenter = getInteractApproachCenter(goal, p.x, p.y);
         const distToApproach = distanceTo(p.x, p.y, approachCenter.x, approachCenter.y);
-        // Close to door/button: steer at approach tile only so we don't jump targets and trigger replan
         if (distToApproach <= INTERACT_STEER_LOCK_DIST) {
             return approachCenter;
         }
-        const pathTarget = pickFromPath(path, true);
+        const pathTarget = pickFromPath(path, p, true, LOOK_AHEAD_TILES);
         if (pathTarget) return pathTarget;
         return approachCenter;
     }
-    const pathTarget = pickFromPath(path, true);
+    // Waypoint/enter_room: short look-ahead so we follow the path step-by-step and don't steer at a point through the door/wall
+    const pathTarget = pickFromPath(path, p, true, LOOK_AHEAD_TILES_NAV);
     if (pathTarget) return pathTarget;
     return { x: goal.x, y: goal.y };
 }
@@ -630,68 +633,8 @@ function steerToward(state, goal) {
         }
         if (nearInteractNoNullReplan) ai._nullPathTime = 0;
 
-        const atDoorInRange = isInteractGoal(goal) && (goal.door
-            ? distanceTo(p.x, p.y, goal.door.cx, goal.door.cy) <= INTERACTION_RANGE
-            : distanceTo(p.x, p.y, goal.x, goal.y) <= INTERACTION_RANGE);
-        const atWaypoint = distToTarget < PATH_REACH_DIST * 2 || atDoorInRange;
-        const nearTargetNoReplan = distToTarget < NEAR_TARGET_NO_REPLAN_DIST;
-        if (nearTargetNoReplan) {
-            ai._stuckNoProgressTime = 0;
-            ai._stuckApproachingInteractTime = 0;
-        }
-        const lastDist = ai._lastSteerTargetDist;
-        const madeProgressTowardSteerTarget = lastDist != null && distToTarget < lastDist - STUCK_PROGRESS_MIN;
-        // For interact goals, count progress toward BOTH door/button AND steer target (path). So following the path counts as progress.
-        const isInteract = isInteractGoal(goal);
-        const interactX = isInteract && (goal.door ? goal.door.cx : goal.x);
-        const interactY = isInteract && (goal.door ? goal.door.cy : goal.y);
-        const distToInteract = (interactX != null && interactY != null) ? distanceTo(p.x, p.y, interactX, interactY) : Infinity;
-        const lastInteractDist = ai._lastInteractDist;
-        const madeProgressTowardInteract = isInteract && (lastInteractDist != null && distToInteract < lastInteractDist - STUCK_PROGRESS_MIN);
-        if (isInteract) ai._lastInteractDist = distToInteract; else ai._lastInteractDist = undefined;
-        const madeProgress = madeProgressTowardSteerTarget || (isInteract && madeProgressTowardInteract);
-
-        // For interact goals: replan only on null path, door-stuck, or stuck approaching (no progress toward path OR door for 3s).
-        const committedToInteract = isInteract && distToInteract <= COMMIT_TO_INTERACT_DIST;
-        if (committedToInteract) ai._stuckNoProgressTime = 0;
-        if (isInteract && !atDoorInRange) {
-            if (madeProgress || distToInteract < NEAR_DOOR_NO_STUCK_APPROACHING) {
-                ai._stuckApproachingInteractTime = 0;
-            } else {
-                ai._stuckApproachingInteractTime = (ai._stuckApproachingInteractTime || 0) + dt;
-                if (ai._stuckApproachingInteractTime >= STUCK_APPROACHING_INTERACT) {
-                    invalidatePathCache();
-                    const replans = (ai._replanCount || 0) + 1;
-                    ai._replanCount = replans;
-                    const backupLen = replans >= REPLAN_COUNT_FOR_EXTRA_BACKUP ? BACKUP_DURATION_EXTRA : BACKUP_DURATION;
-                    ai._backUpUntil = elapsed + backupLen;
-                    ai._stuckApproachingInteractTime = 0;
-                    console.log('[AI] REPLAN — stuck approaching door/button (no progress ' + STUCK_APPROACHING_INTERACT + 's), backing up (replan #' + replans + ')');
-                }
-            }
-        } else if (isInteract) {
-            ai._stuckApproachingInteractTime = 0;
-        }
-        if (!isInteract && lastDist != null && !atWaypoint) {
-            const madeProgress = distToTarget < lastDist - STUCK_PROGRESS_MIN;
-            if (!madeProgress) {
-                ai._stuckNoProgressTime = (ai._stuckNoProgressTime || 0) + dt;
-                if (ai._stuckNoProgressTime >= STUCK_NO_PROGRESS_THRESHOLD) {
-                    invalidatePathCache();
-                    const replans = (ai._replanCount || 0) + 1;
-                    ai._replanCount = replans;
-                    const backupLen = replans >= REPLAN_COUNT_FOR_EXTRA_BACKUP ? BACKUP_DURATION_EXTRA : BACKUP_DURATION;
-                    ai._backUpUntil = elapsed + backupLen;
-                    ai._stuckNoProgressTime = 0;
-                    console.log('[AI] REPLAN — no progress toward target, backing up (replan #' + replans + ')');
-                }
-            } else {
-                ai._stuckNoProgressTime = 0;
-            }
-        } else if (isInteract) {
-            ai._stuckNoProgressTime = 0;
-        }
-        if (!isInteract) ai._stuckApproachingInteractTime = 0;
+        // Track model: stay on the track. Only replan on null path or door stuck — never "no progress" or "stuck approaching".
+        // So we keep trying to reach the current node; we don't get off the track just because we're stuck for a few seconds.
         ai._lastSteerTargetDist = distToTarget;
     } else {
         state.ai._lastSteerTargetDist = distToTarget;
