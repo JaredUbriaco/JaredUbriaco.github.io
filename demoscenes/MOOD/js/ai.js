@@ -8,6 +8,12 @@
  * Engine contract (goal validity, steer target, BFS, stuck recovery) is defined
  * once for all levels in levels/BFS-AND-STEERING.md. No step-specific logic.
  *
+ * The AI uses the same world state the minimap displays: grid, entities, doors,
+ * rooms (getRoomId). There is no separate minimap feed — decisions use that data directly.
+ *
+ * AI_TUNING = general rules (how to walk, aim, combat). Level data (steps, roomOrder) =
+ * the "map and instructions" for the level; level can override via custom doneWhen etc.
+ *
  * Combat: enemy in LOS → goal = enemy. We turn toward them and may advance until
  * within combatNoAdvanceDist; then we STOP moving and only turn + fire (avoids
  * point-blank "dance"). Fire when aim within combatFacingTolerance; if enemy
@@ -67,13 +73,18 @@ const COMBAT_POINT_BLANK_DIST = AI_TUNING.combatPointBlankDist;
 const AIM_DEAD_ZONE = AI_TUNING.aimDeadZone;
 const NO_OVERSHOOT_FRAC = AI_TUNING.noOvershootFrac;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
+const LOOK_AHEAD_TILES = 7; // When we have clear LOS, steer toward a point this far along the path (human-like: run toward goal until in range)
 const COMBAT_RECENT_ENEMY_GRACE = 0.6; // Keep targeting enemy for this long without LOS so we don't rescans
 
 // Stuck recovery: when we don't make progress toward steer target for this long, back up and replan
-const STUCK_NO_PROGRESS_THRESHOLD = 1.2;  // seconds
+const STUCK_NO_PROGRESS_THRESHOLD = 1.0;  // seconds (slightly sooner so we escape corners faster)
 const STUCK_PROGRESS_MIN = 0.2;           // tiles improvement per check to count as progress
 const BACKUP_DURATION = 0.55;             // seconds to back up + wiggle when stuck
+const BACKUP_DURATION_EXTRA = 1.0;        // after many replans, back up longer to escape bad spots
+const REPLAN_COUNT_FOR_EXTRA_BACKUP = 3;
 const NULL_PATH_STUCK_THRESHOLD = 0.8;    // if path is null for this long (nav goal), treat as stuck
+const DOOR_STUCK_TIME = 3;                // at door in range this long without opening → backup and re-approach
+const DOOR_FALLBACK_AFTER_ATTEMPTS = 5;   // after this many door backup cycles, log FAILURE/FALLBACK
 
 // ── List of goals (scripted route from ai-route framework + level data) ─
 // Order: spawn → handgun → first door → next room → kill enemies → button → door → next room → …
@@ -157,8 +168,15 @@ function bfsPath(sx, sy, ex, ey) {
             }
             return path;
         }
-        for (const d of [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }]) {
+        const dirs = [
+            { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+            { x: 1, y: 1 }, { x: -1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: -1 },
+        ];
+        for (const d of dirs) {
             const nx = cur.x + d.x, ny = cur.y + d.y;
+            if (d.x !== 0 && d.y !== 0) {
+                if (!isWalkable(cur.x + d.x, cur.y) || !isWalkable(cur.x, cur.y + d.y)) continue;
+            }
             const key = `${nx},${ny}`;
             if (cameFrom.has(key) || !isWalkable(nx, ny)) continue;
             cameFrom.set(key, cur);
@@ -168,6 +186,25 @@ function bfsPath(sx, sy, ex, ey) {
     return null;
 }
 
+/** Smooth path by string-pulling: keep only nodes we have LOS through (cut corners). Fewer waypoints = smoother ground path. */
+function smoothPath(path) {
+    if (!path || path.length <= 2) return path;
+    const out = [path[0]];
+    let i = 0;
+    while (i < path.length - 1) {
+        const ax = path[i].x + 0.5, ay = path[i].y + 0.5;
+        let best = i + 1;
+        for (let j = i + 2; j < path.length; j++) {
+            const bx = path[j].x + 0.5, by = path[j].y + 0.5;
+            if (hasLineOfSight(ax, ay, bx, by)) best = j;
+        }
+        out.push(path[best]);
+        i = best;
+    }
+    return out;
+}
+
+// Path cache: shorter TTL = recalc path more often (more responsive to blocks); longer = fewer recalc. Stuck recovery invalidates cache so we get a fresh path after backup.
 const PATH_CACHE_TTL = 0.5;
 let pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: -1 };
 let lastCachedStepIndex = -2;
@@ -201,8 +238,9 @@ function getPathToGoal(state, goal) {
         && (elapsed - pathCache.time) < PATH_CACHE_TTL;
     if (cacheHit) return pathCache.path;
 
-    const path = bfsPath(sx, sy, ex, ey);
+    let path = bfsPath(sx, sy, ex, ey);
     if (path) {
+        path = smoothPath(path);
         pathCache = { path, sx, sy, ex, ey, stepIndex, time: elapsed };
         state.ai._pathWasNull = false;
     } else {
@@ -367,7 +405,7 @@ function isInteractGoal(goal) {
     return (goal.type === 'door' && goal.door) || goal.action === 'interact';
 }
 
-/** Approach tile center for an interact goal. Never returns the door/interact point (solid). */
+/** Approach tile center for an interact goal. Multi-tile doors use gate center (cx, cy) so bot goes to middle. */
 function getInteractApproachCenter(goal, px, py) {
     if (goal.type === 'door' && goal.door) {
         const a = getApproachTile(goal.door.cx, goal.door.cy, px, py);
@@ -380,31 +418,37 @@ function getInteractApproachCenter(goal, px, py) {
     return { x: goal.x, y: goal.y };
 }
 
-/** Pick (tx, ty) to steer toward: next path step, or goal. Never steer into solid (see BFS-AND-STEERING.md). */
+/** Pick (tx, ty) to steer toward. Uses look-ahead: when we have LOS, target a point up to LOOK_AHEAD_TILES ahead (human-like straight run until in range). */
 function getSteerTarget(state, goal) {
     const p = state.player;
     if (goal.type === 'enemy' || goal.action === 'fire') {
         return { x: goal.x, y: goal.y };
     }
-    if (isInteractGoal(goal)) {
-        const approach = getInteractApproachCenter(goal, p.x, p.y);
-        const path = getPathToGoal(state, goal);
-        if (path && path.length > 1) {
-            for (let i = 1; i < path.length; i++) {
-                const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
-                if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) return { x: cx, y: cy };
-            }
-        }
-        return approach;
-    }
     const path = getPathToGoal(state, goal);
-    if (path && path.length > 1) {
+    const pickFromPath = (path, useLookAhead) => {
+        if (!path || path.length <= 1) return null;
+        let bestIdx = 1;
         for (let i = 1; i < path.length; i++) {
             const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
-            if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) return { x: cx, y: cy };
+            const dist = distanceTo(p.x, p.y, cx, cy);
+            if (dist <= PATH_REACH_DIST) continue;
+            if (!useLookAhead) {
+                bestIdx = i;
+                break;
+            }
+            if (dist <= LOOK_AHEAD_TILES && hasLineOfSight(p.x, p.y, cx, cy)) bestIdx = i;
+            else break;
         }
-        return { x: goal.x, y: goal.y };
+        const n = path[bestIdx];
+        return { x: n.x + 0.5, y: n.y + 0.5 };
+    };
+    if (isInteractGoal(goal)) {
+        const pathTarget = pickFromPath(path, true);
+        if (pathTarget) return pathTarget;
+        return getInteractApproachCenter(goal, p.x, p.y);
     }
+    const pathTarget = pickFromPath(path, true);
+    if (pathTarget) return pathTarget;
     return { x: goal.x, y: goal.y };
 }
 
@@ -457,9 +501,12 @@ function steerToward(state, goal) {
             ai._nullPathTime = (ai._nullPathTime || 0) + dt;
             if (ai._nullPathTime >= NULL_PATH_STUCK_THRESHOLD) {
                 invalidatePathCache();
-                ai._backUpUntil = elapsed + BACKUP_DURATION;
+                const replans = (ai._replanCount || 0) + 1;
+                ai._replanCount = replans;
+                const backupLen = replans >= REPLAN_COUNT_FOR_EXTRA_BACKUP ? BACKUP_DURATION_EXTRA : BACKUP_DURATION;
+                ai._backUpUntil = elapsed + backupLen;
                 ai._nullPathTime = 0;
-                ai._replanCount = (ai._replanCount || 0) + 1;
+                console.log('[AI] REPLAN — null path to goal for too long, backing up (replan #' + replans + ')');
             }
         } else {
             ai._nullPathTime = 0;
@@ -473,9 +520,12 @@ function steerToward(state, goal) {
                 ai._stuckNoProgressTime = (ai._stuckNoProgressTime || 0) + dt;
                 if (ai._stuckNoProgressTime >= STUCK_NO_PROGRESS_THRESHOLD) {
                     invalidatePathCache();
-                    ai._backUpUntil = elapsed + BACKUP_DURATION;
+                    const replans = (ai._replanCount || 0) + 1;
+                    ai._replanCount = replans;
+                    const backupLen = replans >= REPLAN_COUNT_FOR_EXTRA_BACKUP ? BACKUP_DURATION_EXTRA : BACKUP_DURATION;
+                    ai._backUpUntil = elapsed + backupLen;
                     ai._stuckNoProgressTime = 0;
-                    ai._replanCount = (ai._replanCount || 0) + 1;
+                    console.log('[AI] REPLAN — no progress toward target, backing up (replan #' + replans + ')');
                 }
             } else {
                 ai._stuckNoProgressTime = 0;
@@ -513,20 +563,32 @@ function steerToward(state, goal) {
                 inp.strafeRight = false;
             } else {
                 inp.moveBack = false;
-                const phase = Math.floor((state.time.elapsed || 0) / 2.5) % 2;
-                inp.strafeLeft = phase === 0;
-                inp.strafeRight = phase === 1;
+                // Longer phase (3.5s) + hysteresis: commit to one strafe direction, switch only when angle crosses margin
+                const side = angleDiff; // positive = enemy to our left → strafe right
+                let dir = state.ai._combatStrafeDir;
+                if (dir === undefined) dir = side >= 0 ? 1 : -1;
+                if (dir === 1 && side < -0.22) dir = -1;
+                else if (dir === -1 && side > 0.22) dir = 1;
+                state.ai._combatStrafeDir = dir;
+                inp.strafeLeft = dir === -1;
+                inp.strafeRight = dir === 1;
             }
         } else {
             // Advancing: move forward + circle-strafe toward enemy (diagonal movement while aiming)
             inp.moveForward = true;
             inp.moveBack = false;
-            const side = angleDiff; // positive = enemy to our left (we want to strafe right to orbit)
-            inp.strafeLeft = side < -0.15;
-            inp.strafeRight = side > 0.15;
+            const side = angleDiff;
+            let dir = state.ai._combatStrafeDir;
+            if (dir === undefined) dir = side >= 0 ? 1 : -1;
+            if (dir === 1 && side < -0.2) dir = -1;
+            else if (dir === -1 && side > 0.2) dir = 1;
+            state.ai._combatStrafeDir = dir;
+            inp.strafeLeft = dir === -1;
+            inp.strafeRight = dir === 1;
         }
         return;
     }
+    state.ai._combatStrafeDir = undefined; // clear when leaving combat
 
     // Navigation: move in the direction of the target (forward and/or strafe = diagonal)
     const forwardComponent = Math.cos(angleDiff);
@@ -550,7 +612,9 @@ function performAction(state, goal) {
     const inp = state.ai.input;
 
     if (goal.action === 'interact') {
-        if (isInRangeAndFacing(p.x, p.y, p.angle, goal.x, goal.y, AI_TUNING.interactFacingTolerance)) {
+        const tx = goal.door ? goal.door.cx : goal.x;
+        const ty = goal.door ? goal.door.cy : goal.y;
+        if (isInRangeAndFacing(p.x, p.y, p.angle, tx, ty, AI_TUNING.interactFacingTolerance)) {
             inp.interact = true;
         }
         return;
@@ -593,11 +657,57 @@ export function update(state) {
 
     const stepIndex = getEffectiveCurrentStepIndex(state);
     if (stepIndex !== lastCachedStepIndex) {
+        const prevStep = lastCachedStepIndex >= 0 ? getScriptedRoute()[lastCachedStepIndex] : null;
+        if (prevStep && prevStep.doorKey) {
+            console.log('[AI] DOOR_SUCCESS — step completed: ' + (prevStep.label || 'door'));
+        }
         invalidatePathCache();
         lastCachedStepIndex = stepIndex;
+        state.ai._replanCount = 0;
+        state.ai._doorAttemptCount = 0;
     }
 
     const goal = getCurrentGoal(state);
+
+    if (stepIndex < 0 && goal === null) {
+        const room = getRoomId(state.player.x, state.player.y);
+        const startId = moodLevel1.roomOrder && moodLevel1.roomOrder[0];
+        if (room !== startId && room !== null) {
+            state.ai._noStepLogT = state.ai._noStepLogT || 0;
+            state.ai._noStepLogT += state.time.dt || 0;
+            if (state.ai._noStepLogT >= 5) {
+                console.warn('[AI] NO STEP — no scripted step for this level; bot has no goal. Add steps to level data.');
+                state.ai._noStepLogT = 0;
+            }
+        } else {
+            state.ai._noStepLogT = 0;
+        }
+    }
+
+    if (goal && goal.type === 'door' && goal.door) {
+        const dist = distanceTo(state.player.x, state.player.y, goal.door.cx, goal.door.cy);
+        const inRange = dist <= INTERACTION_RANGE;
+        const elapsed = state.time.elapsed || 0;
+        if (inRange) {
+            if (state.ai._atDoorSince == null) state.ai._atDoorSince = elapsed;
+            if (goal.door.openProgress < 1 && (elapsed - state.ai._atDoorSince) >= DOOR_STUCK_TIME) {
+                invalidatePathCache();
+                state.ai._atDoorSince = null;
+                state.ai._doorAttemptCount = (state.ai._doorAttemptCount || 0) + 1;
+                const backupLen = state.ai._doorAttemptCount >= REPLAN_COUNT_FOR_EXTRA_BACKUP ? BACKUP_DURATION_EXTRA : BACKUP_DURATION;
+                state.ai._backUpUntil = elapsed + backupLen;
+                state.ai._replanCount = (state.ai._replanCount || 0) + 1;
+                console.log('[AI] REPLAN — stuck at door, backing up to re-approach (attempt ' + state.ai._doorAttemptCount + ')');
+                if (state.ai._doorAttemptCount >= DOOR_FALLBACK_AFTER_ATTEMPTS) {
+                    console.warn('[AI] FAILURE/FALLBACK — door still not open after ' + DOOR_FALLBACK_AFTER_ATTEMPTS + ' attempts; continuing to retry.');
+                }
+            }
+        } else {
+            state.ai._atDoorSince = null;
+        }
+    } else {
+        state.ai._atDoorSince = null;
+    }
     if (goal) {
         steerToward(state, goal);
         performAction(state, goal);
