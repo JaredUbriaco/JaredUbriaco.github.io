@@ -74,7 +74,8 @@ const AIM_DEAD_ZONE = AI_TUNING.aimDeadZone;
 const NO_OVERSHOOT_FRAC = AI_TUNING.noOvershootFrac;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
 const LOOK_AHEAD_TILES = 7; // When we have clear LOS, steer toward a point this far along the path (human-like: run toward goal until in range)
-const COMBAT_RECENT_ENEMY_GRACE = 0.6; // Keep targeting enemy for this long without LOS so we don't rescans
+const COMBAT_RECENT_ENEMY_GRACE = 1.2; // Keep targeting enemy for this long without LOS so we don't rescans
+const COMBAT_SWITCH_CLOSER_TILES = 2;  // Only switch to a different visible enemy if they're this many tiles closer
 
 // Stuck recovery: when we don't make progress toward steer target for this long, back up and replan
 const STUCK_NO_PROGRESS_THRESHOLD = 1.0;  // seconds (slightly sooner so we escape corners faster)
@@ -358,9 +359,20 @@ function getCurrentGoal(state) {
     const currentStep = stepIndex >= 0 ? route[stepIndex] : null;
     const isDoorStep = currentStep && currentStep.doorKey;
 
-    // 1) Combat: nearest visible enemy, or recent enemy (combat memory) — but if we only have recent enemy (no LOS) and current step is a door, prefer opening the door so we can reach them
+    // 1) Combat: prefer current target if still in LOS (reduce refocus); else nearest visible, else recent enemy
     let enemy = getNearestVisibleEnemy(state);
     const haveVisibleEnemy = !!enemy;
+    // If we're already targeting someone who's still visible, stick to them unless another enemy is much closer
+    if (state.ai.lastEnemyTargetId != null && haveVisibleEnemy) {
+        const current = state.entities?.find((e) => e.id === state.ai.lastEnemyTargetId && e.hp > 0);
+        if (current && hasLineOfSight(p.x, p.y, current.x, current.y) && distanceTo(p.x, p.y, current.x, current.y) <= COMBAT_MAX_RANGE) {
+            const distCurrent = distanceTo(p.x, p.y, current.x, current.y);
+            const distNearest = distanceTo(p.x, p.y, enemy.x, enemy.y);
+            if (distNearest >= distCurrent - COMBAT_SWITCH_CLOSER_TILES) {
+                enemy = current; // keep current target
+            }
+        }
+    }
     if (!enemy) enemy = getRecentEnemyIfValid(state);
     if (enemy) {
         const haveLOS = haveVisibleEnemy || hasLineOfSight(p.x, p.y, enemy.x, enemy.y);
@@ -419,7 +431,9 @@ function getInteractApproachCenter(goal, px, py) {
 }
 
 /** When within this many tiles of an interact goal, steer at approach tile only (no look-ahead) so target doesn't jump and trigger replan. */
-const INTERACT_STEER_LOCK_DIST = 2.5;
+const INTERACT_STEER_LOCK_DIST = 5;
+/** When this close to an interact point, never trigger "no progress" replan — we're committed to walking there. */
+const COMMIT_TO_INTERACT_DIST = 5;
 
 /** Pick (tx, ty) to steer toward. Uses look-ahead: when we have LOS, target a point up to LOOK_AHEAD_TILES ahead (human-like straight run until in range). */
 function getSteerTarget(state, goal) {
@@ -533,7 +547,6 @@ function steerToward(state, goal) {
         const atWaypoint = distToTarget < PATH_REACH_DIST * 2 || atDoorInRange;
         const lastDist = ai._lastSteerTargetDist;
         // For interact goals, also count progress toward the interaction point (door/button), not just steer target.
-        // Steer target can jump due to look-ahead/path recalc; if we're getting closer to the door, don't replan.
         const isInteract = isInteractGoal(goal);
         const interactX = isInteract && (goal.door ? goal.door.cx : goal.x);
         const interactY = isInteract && (goal.door ? goal.door.cy : goal.y);
@@ -542,8 +555,11 @@ function steerToward(state, goal) {
         const madeProgressTowardInteract = isInteract && (lastInteractDist != null && distToInteract < lastInteractDist - STUCK_PROGRESS_MIN);
         if (isInteract) ai._lastInteractDist = distToInteract; else ai._lastInteractDist = undefined;
 
-        if (lastDist != null && !atWaypoint) {
-            const madeProgress = distToTarget < lastDist - STUCK_PROGRESS_MIN || (isInteractGoal(goal) && madeProgressTowardInteract);
+        // When committed to an interact goal (within COMMIT_TO_INTERACT_DIST), never replan for "no progress" — just walk there.
+        const committedToInteract = isInteract && distToInteract <= COMMIT_TO_INTERACT_DIST;
+        if (committedToInteract) ai._stuckNoProgressTime = 0;
+        if (lastDist != null && !atWaypoint && !committedToInteract) {
+            const madeProgress = distToTarget < lastDist - STUCK_PROGRESS_MIN || (isInteract && madeProgressTowardInteract);
             if (!madeProgress) {
                 ai._stuckNoProgressTime = (ai._stuckNoProgressTime || 0) + dt;
                 if (ai._stuckNoProgressTime >= STUCK_NO_PROGRESS_THRESHOLD) {
@@ -747,16 +763,18 @@ export function update(state) {
     const rawStepIndex = getCurrentScriptedStepIndex(state);
     const roomId = getRoomId(state.player.x, state.player.y);
 
-    // Debug: goal summary and door state for area0 door (common regression point)
+    // Debug: goal summary; for door goals show THIS door's state, not a hardcoded tile
     let goalSummary = 'none';
+    let goalDoorOpen = null;
     if (goal) {
         if (goal.type === 'enemy' && goal.entity) goalSummary = `enemy ${goal.entity.id}`;
-        else if (goal.door) goalSummary = `door ${goal.door.cx.toFixed(0)},${goal.door.cy.toFixed(0)}`;
-        else if (goal.type === 'waypoint') goalSummary = `waypoint ${goal.x.toFixed(0)},${goal.y.toFixed(0)}`;
+        else if (goal.door) {
+            goalSummary = `door ${goal.door.cx.toFixed(0)},${goal.door.cy.toFixed(0)}`;
+            goalDoorOpen = goal.door.openProgress >= 1;
+        } else if (goal.type === 'waypoint') goalSummary = `waypoint ${goal.x.toFixed(0)},${goal.y.toFixed(0)}`;
         else goalSummary = goal.type || '?';
     }
     const door0 = doors['8,5'];
-    const door0Open = door0 ? door0.openProgress >= 1 : 'no ref';
 
     state.ai.telemetry = {
         state: goal ? goal.type : 'idle',
@@ -776,7 +794,8 @@ export function update(state) {
         goalSummary,
         roomId: roomId || 'null',
         skippedSteps: state.ai._debugStepSkip || [],
-        door_8_5_open: door0Open,
+        goalDoorOpen: goalDoorOpen,
+        door_8_5_open: door0 ? door0.openProgress >= 1 : 'no ref',
         door_8_5_progress: door0 ? door0.openProgress.toFixed(2) : '—',
         lastEnemyId: state.ai.lastEnemyTargetId,
         stuckTimer: (state.ai._stuckNoProgressTime ?? 0).toFixed(2),
@@ -789,8 +808,9 @@ export function update(state) {
     state.ai._debugLogT += state.time.dt || 0;
     if (state.ai._debugLogT >= 2) {
         state.ai._debugLogT = 0;
+        const doorStatus = goalDoorOpen != null ? ` goalDoorOpen=${goalDoorOpen}` : '';
         console.log(
-            `[AI] room=${roomId || 'null'} rawStep=${rawStepIndex} effectiveStep=${stepIndex} step=${stepLabel || '—'} goal=${goalSummary} door8,5 open=${door0Open} progress=${state.ai.debug.door_8_5_progress} skipped=[${(state.ai._debugStepSkip || []).join(', ')}]`
+            `[AI] room=${roomId || 'null'} rawStep=${rawStepIndex} effectiveStep=${stepIndex} step=${stepLabel || '—'} goal=${goalSummary}${doorStatus} skipped=[${(state.ai._debugStepSkip || []).join(', ')}]`
         );
     }
 }
