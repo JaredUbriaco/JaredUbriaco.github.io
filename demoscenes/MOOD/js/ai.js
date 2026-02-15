@@ -121,15 +121,32 @@ function getEffectiveCurrentStepIndex(state) {
             continue;
         }
         if (step.doorKey && !doors[step.doorKey]) {
-            skipReasons.push(`${i}:${step.label}(door missing)`);
-            if (!state.ai._warnedMissingDoor) {
-                state.ai._warnedMissingDoor = new Set();
+            // Fallback: resolve door by step position (handles wrong/mismatched doorKey in level data)
+            const sx = step.x != null ? step.x : (step.position && step.position.x);
+            const sy = step.y != null ? step.y : (step.position && step.position.y);
+            if (sx != null && sy != null) {
+                for (const g of gates) {
+                    for (const t of g.tiles) {
+                        const cx = t.x + 0.5, cy = t.y + 0.5;
+                        if (Math.abs(cx - sx) <= 1.5 && Math.abs(cy - sy) <= 1.5) {
+                            step.doorKey = `${t.x},${t.y}`;
+                            break;
+                        }
+                    }
+                    if (doors[step.doorKey]) break;
+                }
             }
-            if (!state.ai._warnedMissingDoor.has(step.doorKey)) {
-                console.warn('[AI] Step "' + (step.label || i) + '" has doorKey "' + step.doorKey + '" but door not in world; skipping step.');
-                state.ai._warnedMissingDoor.add(step.doorKey);
+            if (!doors[step.doorKey]) {
+                skipReasons.push(`${i}:${step.label}(door missing)`);
+                if (!state.ai._warnedMissingDoor) {
+                    state.ai._warnedMissingDoor = new Set();
+                }
+                if (!state.ai._warnedMissingDoor.has(step.doorKey)) {
+                    console.warn('[AI] Step "' + (step.label || i) + '" has doorKey "' + step.doorKey + '" but door not in world; skipping step.');
+                    state.ai._warnedMissingDoor.add(step.doorKey);
+                }
+                continue;
             }
-            continue;
         }
         if (step.doorKey && doors[step.doorKey].openProgress >= 1) {
             skipReasons.push(`${i}:${step.label}(door open)`);
@@ -747,7 +764,12 @@ export function update(state) {
         state.ai._lastInteractDist = undefined;
     }
 
-    const goal = getCurrentGoal(state);
+    let goal = getCurrentGoal(state);
+
+    // When enemy is behind wall: navigate to last known position so we move around the wall to re-engage
+    if (goal && (goal.type === 'enemy' || goal.action === 'fire') && !hasLineOfSight(state.player.x, state.player.y, goal.x, goal.y)) {
+        goal = { type: 'waypoint', x: goal.x, y: goal.y };
+    }
 
     if (goal && goal.action === 'interact' && goal.x === 0 && goal.y === 0) {
         if (!state.ai._warnedInteractZero) {
