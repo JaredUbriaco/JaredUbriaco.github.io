@@ -164,7 +164,16 @@ function updateDebug(dt) {
         `AI: ${state.ai.active ? 'ACTIVE' : 'inactive'}\n` +
         `Weapon: ${p.currentWeapon} [${p.weaponState.phase}]\n` +
         `Elapsed: ${state.time.elapsed.toFixed(1)}s`;
-    if (state.ai.active && state.ai.telemetry && Object.keys(state.ai.telemetry).length > 0) {
+    if (state.ai.active && state.ai.debug) {
+        const d = state.ai.debug;
+        debugText +=
+            `\n— AI —\n` +
+            `Room: ${d.roomId}  Goal: ${d.goalSummary}\n` +
+            `Raw step: ${d.rawStepIndex}  Effective: ${d.effectiveStepIndex}  Step: ${d.stepLabel || '—'}\n` +
+            `Door 8,5: open=${d.door_8_5_open} progress=${d.door_8_5_progress}\n` +
+            `Skipped: [${(d.skippedSteps || []).join(', ')}]\n` +
+            `Last enemy id: ${d.lastEnemyId ?? '—'}`;
+    } else if (state.ai.active && state.ai.telemetry && Object.keys(state.ai.telemetry).length > 0) {
         const t = state.ai.telemetry;
         debugText +=
             `\n— AI —\n` +

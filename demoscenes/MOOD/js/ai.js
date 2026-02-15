@@ -88,15 +88,25 @@ function getCurrentScriptedStepIndex(state) {
 /**
  * Effective current step: first step that is not done AND (if it's a door step) the door
  * is still interactable (not open). Ensures we never target an open door/gate.
+ * Optionally fills state.ai._debugStepSkip with why we skipped each step (for debugging).
  */
 function getEffectiveCurrentStepIndex(state) {
     const route = getScriptedRoute();
+    const skipReasons = [];
     for (let i = 0; i < route.length; i++) {
-        if (route[i].doneWhen(state)) continue;
         const step = route[i];
-        if (step.doorKey && doors[step.doorKey] && doors[step.doorKey].openProgress >= 1) continue;
+        if (step.doneWhen(state)) {
+            skipReasons.push(`${i}:${step.label}(done)`);
+            continue;
+        }
+        if (step.doorKey && doors[step.doorKey] && doors[step.doorKey].openProgress >= 1) {
+            skipReasons.push(`${i}:${step.label}(door open)`);
+            continue;
+        }
+        state.ai._debugStepSkip = skipReasons;
         return i;
     }
+    state.ai._debugStepSkip = skipReasons;
     return -1;
 }
 
@@ -474,6 +484,19 @@ export function update(state) {
     }
     const route = getScriptedRoute();
     const stepLabel = stepIndex >= 0 ? route[stepIndex].label : null;
+    const rawStepIndex = getCurrentScriptedStepIndex(state);
+    const roomId = getRoomId(state.player.x, state.player.y);
+
+    // Debug: goal summary and door state for area0 door (common regression point)
+    let goalSummary = 'none';
+    if (goal) {
+        if (goal.type === 'enemy' && goal.entity) goalSummary = `enemy ${goal.entity.id}`;
+        else if (goal.door) goalSummary = `door ${goal.door.cx.toFixed(0)},${goal.door.cy.toFixed(0)}`;
+        else if (goal.type === 'waypoint') goalSummary = `waypoint ${goal.x.toFixed(0)},${goal.y.toFixed(0)}`;
+        else goalSummary = goal.type || '?';
+    }
+    const door0 = doors['8,5'];
+    const door0Open = door0 ? door0.openProgress >= 1 : 'no ref';
 
     state.ai.telemetry = {
         state: goal ? goal.type : 'idle',
@@ -483,4 +506,27 @@ export function update(state) {
         stuckTimer: 0,
         replanCount: 0,
     };
+
+    state.ai.debug = {
+        rawStepIndex,
+        effectiveStepIndex: stepIndex,
+        stepLabel,
+        goalType: goal ? goal.type : null,
+        goalSummary,
+        roomId: roomId || 'null',
+        skippedSteps: state.ai._debugStepSkip || [],
+        door_8_5_open: door0Open,
+        door_8_5_progress: door0 ? door0.openProgress.toFixed(2) : '—',
+        lastEnemyId: state.ai.lastEnemyTargetId,
+    };
+
+    // Throttled console log (every ~2s) to trace regression without flooding
+    if (!state.ai._debugLogT) state.ai._debugLogT = 0;
+    state.ai._debugLogT += state.time.dt || 0;
+    if (state.ai._debugLogT >= 2) {
+        state.ai._debugLogT = 0;
+        console.log(
+            `[AI] room=${roomId || 'null'} rawStep=${rawStepIndex} effectiveStep=${stepIndex} step=${stepLabel || '—'} goal=${goalSummary} door8,5 open=${door0Open} progress=${state.ai.debug.door_8_5_progress} skipped=[${(state.ai._debugStepSkip || []).join(', ')}]`
+        );
+    }
 }
