@@ -288,12 +288,15 @@ function gameLoop(timestamp) {
         return;
     }
 
-    // ── Step 3: AI update ───────────────────────────────────────
+    // ── Step 3: Advance door animations (before AI so AI sees current door state) ─
+    triggers.advanceDoorAnimations(state);
+
+    // ── Step 4: AI update ───────────────────────────────────────
     objectives.updateObjectives(state);
     state.ai.active = input.isAIActive();
     ai.update(state);
 
-    // ── Step 4: Player update ───────────────────────────────────
+    // ── Step 5: Player update ───────────────────────────────────
     player.update(state);
 
     // Check if player entered a new room
@@ -302,22 +305,22 @@ function gameLoop(timestamp) {
         setRoomLabel(state.hud.currentRoomLabel);
     }
 
-    // ── Step 5: Entities update ─────────────────────────────────
+    // ── Step 6: Entities update ─────────────────────────────────
     entities.update(state);
 
-    // ── Step 6: Projectiles update ──────────────────────────────
+    // ── Step 7: Projectiles update ──────────────────────────────
     projectiles.update(state);
 
-    // ── Step 7: Pickups update ──────────────────────────────────
+    // ── Step 8: Pickups update ──────────────────────────────────
     pickups.update(state);
 
-    // ── Step 8: Triggers update ─────────────────────────────────
+    // ── Step 9: Triggers update (process interact after AI) ─────
     triggers.update(state);
 
-    // ── Step 9: Combat update ───────────────────────────────────
+    // ── Step 10: Combat update ──────────────────────────────────
     combat.update(state);
 
-    // ── Step 10: Effects update ─────────────────────────────────
+    // ── Step 11: Effects update ─────────────────────────────────
     // Tick down effect timers
     if (state.effects.screenShake > 0) state.effects.screenShake--;
     if (state.effects.distortion > 0) state.effects.distortion -= dt;
@@ -346,10 +349,10 @@ function gameLoop(timestamp) {
         state.hud.messages.push({ text: 'ASTRAL KEY DROPPED', timer: 2 });
     }
 
-    // ── Step 11: Render ─────────────────────────────────────────
+    // ── Step 12: Render ─────────────────────────────────────────
     renderer.draw(state, ctx);
 
-    // ── Step 12: Audio update ───────────────────────────────────
+    // ── Step 13: Audio update ───────────────────────────────────
     audio.update(state);
 
     // ── HUD & Overlays ──────────────────────────────────────────

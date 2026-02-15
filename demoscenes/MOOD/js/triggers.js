@@ -122,18 +122,14 @@ function findNearbySecretWall(px, py, pAngle, angleLimit = INTERACTION_ANGLE) {
     return null;
 }
 
-// ── Main Update ─────────────────────────────────────────────────────
+// ── Door animation (run before AI so AI sees current door state) ─────
 
 /**
- * Update triggers system: handle E-key interactions and door animations.
- * @param {object} state - Shared game state
+ * Advance door open animations. Call once per frame, before AI update.
+ * Gate state and grid are updated together so pathfinding and goal selection agree.
  */
-export function update(state) {
+export function advanceDoorAnimations(state) {
     const dt = state.time.dt;
-    const p = state.player;
-    noInteractHintCooldown = Math.max(0, noInteractHintCooldown - dt);
-
-    // ── Animate Opening Gates (one gate per opening; all tiles open together) ─
     for (const gate of gates) {
         if (gate.opening && gate.openProgress < 1) {
             gate.openProgress += dt / DOOR_OPEN_DURATION;
@@ -147,6 +143,17 @@ export function update(state) {
             }
         }
     }
+}
+
+// ── Main Update ─────────────────────────────────────────────────────
+
+/**
+ * Process E-key interactions (doors, button, secret). Call after AI so we see this frame's interact.
+ */
+export function update(state) {
+    const dt = state.time.dt;
+    const p = state.player;
+    noInteractHintCooldown = Math.max(0, noInteractHintCooldown - dt);
 
     // ── E-Key Interaction ───────────────────────────────────────
     let wantsInteract;

@@ -314,17 +314,7 @@ function getCurrentGoal(state) {
 
 // ── Steering ─────────────────────────────────────────────────────────
 
-/** When path to goal is null, steer toward nearest closed door so we don't sit stuck. */
-function getFallbackSteerTarget(state) {
-    const doorGoal = getNearestClosedDoor(state, 12);
-    if (!doorGoal) return null;
-    const px = state.player.x;
-    const py = state.player.y;
-    const a = getApproachTile(doorGoal.x, doorGoal.y, px, py);
-    return { x: a.x + 0.5, y: a.y + 0.5 };
-}
-
-/** Pick (tx, ty) to steer toward: next path step, or goal if no path / combat. */
+/** Pick (tx, ty) to steer toward: next path step, or goal. Never steer toward a different goal when path is null — stick to current goal (forward-only). */
 function getSteerTarget(state, goal) {
     const p = state.player;
     if (goal.type === 'enemy' || goal.action === 'fire') {
@@ -338,8 +328,15 @@ function getSteerTarget(state, goal) {
         }
         return { x: goal.x, y: goal.y };
     }
-    const fallback = getFallbackSteerTarget(state);
-    if (fallback) return fallback;
+    // Path null or length 1: keep current goal (e.g. door we're at while it opens). Do not fall back to "nearest closed door" — that would send us backward.
+    if (goal.type === 'door' && goal.door) {
+        const a = getApproachTile(goal.door.cx, goal.door.cy, p.x, p.y);
+        return { x: a.x + 0.5, y: a.y + 0.5 };
+    }
+    if (goal.action === 'interact') {
+        const a = getApproachTile(goal.x, goal.y, p.x, p.y);
+        return { x: a.x + 0.5, y: a.y + 0.5 };
+    }
     return { x: goal.x, y: goal.y };
 }
 
