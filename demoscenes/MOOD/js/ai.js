@@ -418,6 +418,9 @@ function getInteractApproachCenter(goal, px, py) {
     return { x: goal.x, y: goal.y };
 }
 
+/** When within this many tiles of an interact goal, steer at approach tile only (no look-ahead) so target doesn't jump and trigger replan. */
+const INTERACT_STEER_LOCK_DIST = 2.5;
+
 /** Pick (tx, ty) to steer toward. Uses look-ahead: when we have LOS, target a point up to LOOK_AHEAD_TILES ahead (human-like straight run until in range). */
 function getSteerTarget(state, goal) {
     const p = state.player;
@@ -427,25 +430,37 @@ function getSteerTarget(state, goal) {
     const path = getPathToGoal(state, goal);
     const pickFromPath = (path, useLookAhead) => {
         if (!path || path.length <= 1) return null;
-        let bestIdx = 1;
+        let firstUnreached = -1;
         for (let i = 1; i < path.length; i++) {
             const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
-            const dist = distanceTo(p.x, p.y, cx, cy);
-            if (dist <= PATH_REACH_DIST) continue;
-            if (!useLookAhead) {
-                bestIdx = i;
+            if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) {
+                firstUnreached = i;
                 break;
             }
-            if (dist <= LOOK_AHEAD_TILES && hasLineOfSight(p.x, p.y, cx, cy)) bestIdx = i;
-            else break;
+        }
+        if (firstUnreached < 0) return null;
+        let bestIdx = firstUnreached;
+        if (useLookAhead) {
+            for (let i = firstUnreached + 1; i < path.length; i++) {
+                const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
+                const dist = distanceTo(p.x, p.y, cx, cy);
+                if (dist <= LOOK_AHEAD_TILES && hasLineOfSight(p.x, p.y, cx, cy)) bestIdx = i;
+                else break;
+            }
         }
         const n = path[bestIdx];
         return { x: n.x + 0.5, y: n.y + 0.5 };
     };
     if (isInteractGoal(goal)) {
+        const approachCenter = getInteractApproachCenter(goal, p.x, p.y);
+        const distToApproach = distanceTo(p.x, p.y, approachCenter.x, approachCenter.y);
+        // Close to door/button: steer at approach tile only so we don't jump targets and trigger replan
+        if (distToApproach <= INTERACT_STEER_LOCK_DIST) {
+            return approachCenter;
+        }
         const pathTarget = pickFromPath(path, true);
         if (pathTarget) return pathTarget;
-        return getInteractApproachCenter(goal, p.x, p.y);
+        return approachCenter;
     }
     const pathTarget = pickFromPath(path, true);
     if (pathTarget) return pathTarget;
@@ -512,10 +527,23 @@ function steerToward(state, goal) {
             ai._nullPathTime = 0;
         }
 
-        const atWaypoint = distToTarget < PATH_REACH_DIST * 2;
+        const atDoorInRange = isInteractGoal(goal) && (goal.door
+            ? distanceTo(p.x, p.y, goal.door.cx, goal.door.cy) <= INTERACTION_RANGE
+            : distanceTo(p.x, p.y, goal.x, goal.y) <= INTERACTION_RANGE);
+        const atWaypoint = distToTarget < PATH_REACH_DIST * 2 || atDoorInRange;
         const lastDist = ai._lastSteerTargetDist;
+        // For interact goals, also count progress toward the interaction point (door/button), not just steer target.
+        // Steer target can jump due to look-ahead/path recalc; if we're getting closer to the door, don't replan.
+        const isInteract = isInteractGoal(goal);
+        const interactX = isInteract && (goal.door ? goal.door.cx : goal.x);
+        const interactY = isInteract && (goal.door ? goal.door.cy : goal.y);
+        const distToInteract = (interactX != null && interactY != null) ? distanceTo(p.x, p.y, interactX, interactY) : Infinity;
+        const lastInteractDist = ai._lastInteractDist;
+        const madeProgressTowardInteract = isInteract && (lastInteractDist != null && distToInteract < lastInteractDist - STUCK_PROGRESS_MIN);
+        if (isInteract) ai._lastInteractDist = distToInteract; else ai._lastInteractDist = undefined;
+
         if (lastDist != null && !atWaypoint) {
-            const madeProgress = distToTarget < lastDist - STUCK_PROGRESS_MIN;
+            const madeProgress = distToTarget < lastDist - STUCK_PROGRESS_MIN || (isInteractGoal(goal) && madeProgressTowardInteract);
             if (!madeProgress) {
                 ai._stuckNoProgressTime = (ai._stuckNoProgressTime || 0) + dt;
                 if (ai._stuckNoProgressTime >= STUCK_NO_PROGRESS_THRESHOLD) {
@@ -536,6 +564,7 @@ function steerToward(state, goal) {
         state.ai._lastSteerTargetDist = distToTarget;
         state.ai._stuckNoProgressTime = 0;
         state.ai._nullPathTime = 0;
+        state.ai._lastInteractDist = undefined;
     }
 
     // ── Aim: always turn toward target (like a player moving the mouse). Never stop aiming when we have a goal. ──
@@ -665,6 +694,7 @@ export function update(state) {
         lastCachedStepIndex = stepIndex;
         state.ai._replanCount = 0;
         state.ai._doorAttemptCount = 0;
+        state.ai._lastInteractDist = undefined;
     }
 
     const goal = getCurrentGoal(state);
