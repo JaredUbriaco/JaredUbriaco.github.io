@@ -9,6 +9,31 @@ export const moodLevel1 = {
     roomOrder: ['area0', 'area1', 'a2r1', 'a2r2', 'a2r3', 'a2r4', 'a2r5', 'bossCorridor', 'area3'],
     exploreFallbackRoomId: 'area1',
 
+    /** Combat track per room: ordered waypoints (tile coords) central to the room. Bot paths to track points when killing enemies, not to enemy position — keeps path off walls/corners. */
+    roomTracks: {
+        area1: [
+            { x: 14, y: 5 }, { x: 14, y: 9 }, { x: 19, y: 9 }, { x: 19, y: 5 },
+        ],
+        a2r1: [
+            { x: 17, y: 22 }, { x: 17, y: 25 }, { x: 20, y: 25 }, { x: 20, y: 22 },
+        ],
+        a2r2: [
+            { x: 5, y: 24 }, { x: 5, y: 28 }, { x: 7, y: 30 }, { x: 4, y: 30 },
+        ],
+        a2r3: [
+            { x: 16, y: 35 }, { x: 19, y: 35 }, { x: 19, y: 40 }, { x: 16, y: 40 },
+        ],
+        a2r4: [
+            { x: 28, y: 39 }, { x: 31, y: 39 }, { x: 31, y: 42 }, { x: 28, y: 42 },
+        ],
+        a2r5: [
+            { x: 20, y: 46 }, { x: 22, y: 46 }, { x: 22, y: 49 }, { x: 20, y: 49 },
+        ],
+        area3: [
+            { x: 19, y: 58 }, { x: 19, y: 62 },
+        ],
+    },
+
     steps: [
         { type: 'pickup', label: 'handgun', id: 'handgun', weaponId: 'HANDGUN', pastRoomId: 'area0' },
         { type: 'door', label: 'door_area0_hall', doorKey: '8,5', pastRoomId: 'area1', position: { x: 8.5, y: 5.5 } },
@@ -42,5 +67,7 @@ export function createMoodLevel1WorldApi(map) {
         getRoomBounds: (roomId) => bounds[roomId],
         getPickup: (id) => pickups[id],
         getInteractable: (id) => interactables[id],
+        /** Combat track for room: ordered waypoints (tile coords). When clearing room, bot paths along this track instead of to enemy position. */
+        getRoomTrack: (roomId) => (moodLevel1.roomTracks && moodLevel1.roomTracks[roomId]) || null,
     };
 }

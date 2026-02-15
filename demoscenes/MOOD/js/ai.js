@@ -275,7 +275,10 @@ function invalidatePathCache() {
     pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: -1 };
 }
 
-/** Path from player to goal. Track = waypoints + path. One approach tile per door (the central one). No "trying" — certain. */
+/** Path from player to goal. Two kinds of track:
+ * - Objective track: doors, buttons, waypoints — path to approach tile or step position (central, certain).
+ * - Combat track: when killing enemy in a room with roomTracks, path to a track waypoint (closest to enemy, reachable), not to enemy position — keeps movement central, off corners.
+ */
 function getPathToGoal(state, goal) {
     const stepIndex = state.ai._effectiveStepIndex ?? getEffectiveCurrentStepIndex(state);
     const px = state.player.x;
@@ -291,7 +294,36 @@ function getPathToGoal(state, goal) {
         const a = getCentralApproachTile(goal.x, goal.y);
         ex = a.x; ey = a.y;
     } else {
-        ex = Math.floor(goal.x); ey = Math.floor(goal.y);
+        ex = Math.floor(goal.x);
+        ey = Math.floor(goal.y);
+    }
+    let pathPrecomputed = null;
+    if ((goal.type === 'enemy' || goal.action === 'fire') && goal.entity && worldApi.getRoomTrack) {
+        const roomId = goal.entity.roomId;
+        const track = roomId ? worldApi.getRoomTrack(roomId) : null;
+        if (track && track.length > 0) {
+            const ex_ = goal.entity.x;
+            const ey_ = goal.entity.y;
+            const sorted = [...track].filter((p) => isWalkable(p.x, p.y)).sort(
+                (a, b) => distanceTo(a.x + 0.5, a.y + 0.5, ex_, ey_) - distanceTo(b.x + 0.5, b.y + 0.5, ex_, ey_)
+            );
+            for (const pt of sorted) {
+                const pth = bfsPath(sx, sy, pt.x, pt.y);
+                if (pth) {
+                    ex = pt.x;
+                    ey = pt.y;
+                    pathPrecomputed = pth;
+                    break;
+                }
+            }
+            if (pathPrecomputed == null) {
+                ex = Math.floor(goal.x);
+                ey = Math.floor(goal.y);
+            }
+        } else {
+            ex = Math.floor(goal.x);
+            ey = Math.floor(goal.y);
+        }
     }
 
     const cacheHit = pathCache.path
@@ -300,7 +332,7 @@ function getPathToGoal(state, goal) {
         && (elapsed - pathCache.time) < PATH_CACHE_TTL;
     if (cacheHit) return pathCache.path;
 
-    const path = bfsPath(sx, sy, ex, ey);
+    const path = pathPrecomputed || bfsPath(sx, sy, ex, ey);
     if (path) {
         const smoothed = smoothPath(path);
         pathCache = { path: smoothed, sx, sy, ex, ey, stepIndex, time: elapsed };
@@ -348,6 +380,22 @@ function getNearestVisibleEnemy(state) {
         const d = distanceTo(p.x, p.y, e.x, e.y);
         if (d > COMBAT_MAX_RANGE || d >= minDist) continue;
         if (!hasLineOfSight(p.x, p.y, e.x, e.y)) continue;
+        minDist = d;
+        nearest = e;
+    }
+    return nearest;
+}
+
+/** Nearest live enemy in the given room (by distance). Used to clear room before button/interact. */
+function getNearestEnemyInRoom(state, roomId) {
+    const p = state.player;
+    const entities = state.entities || [];
+    let nearest = null;
+    let minDist = Infinity;
+    for (const e of entities) {
+        if (e.hp <= 0 || e.roomId !== roomId) continue;
+        const d = distanceTo(p.x, p.y, e.x, e.y);
+        if (d >= minDist) continue;
         minDist = d;
         nearest = e;
     }
@@ -450,9 +498,21 @@ function getCurrentGoal(state) {
     }
     state.ai.lastEnemyTargetId = null;
 
-    // 2) List of goals: first step not done and (if door) still interactable — never target an open door
+    // 2) Scripted step — but never go to button/interact until that room is clear (minimap/level: clear room first)
     if (stepIndex >= 0) {
-        return stepToGoal(route[stepIndex]);
+        const step = route[stepIndex];
+        const stepRoomId = step.type === 'button' || step.action === 'interact'
+            ? (step.roomId || getRoomId(step.x, step.y))
+            : null;
+        if (stepRoomId && !isRoomClear(state, stepRoomId)) {
+            const enemyInRoom = getNearestEnemyInRoom(state, stepRoomId);
+            if (enemyInRoom) {
+                state.ai.lastEnemyTargetId = enemyInRoom.id;
+                state.ai.lastEnemyTime = state.time.elapsed || 0;
+                return { type: 'enemy', x: enemyInRoom.x, y: enemyInRoom.y, action: 'fire', entity: enemyInRoom };
+            }
+        }
+        return stepToGoal(step);
     }
 
     // 3) Fallback: nearest closed door only when still in area0/hallway (never target a door behind us)
@@ -636,8 +696,7 @@ function steerToward(state, goal) {
         }
         if (nearInteractNoNullReplan) ai._nullPathTime = 0;
 
-        // Track model: stay on the track. Only replan on null path or door stuck — never "no progress" or "stuck approaching".
-        // So we keep trying to reach the current node; we don't get off the track just because we're stuck for a few seconds.
+        // Stay on track: no "no progress" replan. Pathing/steering are central; corners avoided by combat/objective tracks.
         ai._lastSteerTargetDist = distToTarget;
     } else {
         state.ai._lastSteerTargetDist = distToTarget;
