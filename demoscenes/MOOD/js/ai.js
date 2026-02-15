@@ -12,13 +12,20 @@
  * so shots land while they move.
  */
 
+import * as map from './map.js';
 import {
     isSolid, getRoomId, doors, gates, getMapWidth, getMapHeight,
-    PICKUP_POSITIONS, INTERACTABLE_POSITIONS, ROOM_BOUNDS,
 } from './map.js';
 import { TILE, INTERACTION_RANGE, INTERACTION_ANGLE, PLAYER_RADIUS, MOUSE_SENSITIVITY } from './config.js';
 import { getCurrentObjectiveTask } from './objectives.js';
 import { angleTo, distanceTo, normalizeAngle } from './utils.js';
+import {
+    buildRoute, getCurrentScriptedStepIndex as getRouteStepIndex,
+    stepToGoal as routeStepToGoal, isRoomClear, getExploreFallbackRoom,
+} from './ai-route.js';
+import { moodLevel1, createMoodLevel1WorldApi } from './levels/mood-level1.js';
+
+const worldApi = createMoodLevel1WorldApi(map);
 
 // ── Tuning ──────────────────────────────────────────────────────────
 // lookDxMax: AI outputs lookDX; player does angle += lookDX * MOUSE_SENSITIVITY (0.002).
@@ -58,62 +65,22 @@ const AIM_DEAD_ZONE = AI_TUNING.aimDeadZone;
 const NO_OVERSHOOT_FRAC = AI_TUNING.noOvershootFrac;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
 
-// ── Scripted route (1990s-style: fixed sequence to complete the level) ─
-/** One step: { x, y, action?, doorKey?, doneWhen(state) }. First step with !doneWhen(state) is current. */
-function buildScriptedRoute() {
-    const a1 = ROOM_BOUNDS.area1;
-    const a2r1 = ROOM_BOUNDS.a2r1;
-    const a2r2 = ROOM_BOUNDS.a2r2;
-    const a2r3 = ROOM_BOUNDS.a2r3;
-    const a2r4 = ROOM_BOUNDS.a2r4;
-    const a2r5 = ROOM_BOUNDS.a2r5;
-    const a3 = ROOM_BOUNDS.area3;
-    const handgun = PICKUP_POSITIONS.handgun;
-    const button = INTERACTABLE_POSITIONS.area1Button;
-    const shotgun = PICKUP_POSITIONS.shotgun;
-    const voidbeam = PICKUP_POSITIONS.voidbeam;
-
-    return [
-        { label: 'handgun', x: handgun.x, y: handgun.y, action: 'interact', doneWhen: (s) => s.player.weapons && s.player.weapons.includes('HANDGUN') },
-        { label: 'door_area0_hall', x: 8.5, y: 5.5, action: 'interact', doorKey: '8,5', doneWhen: (s) => (doors['8,5'] && doors['8,5'].openProgress >= 1) },
-        { label: 'enter_area1', x: a1.x + a1.w / 2, y: a1.y + a1.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'area1' && isRoomClear(s, 'area1') },
-        { label: 'button', x: button.x, y: button.y, action: 'interact', doneWhen: (s) => !!s.flags.buttonPressed },
-        { label: 'gate_area2', x: 19.5, y: 15.5, action: 'interact', doorKey: '19,15', doneWhen: (s) => (doors['19,15'] && doors['19,15'].openProgress >= 1) },
-        { label: 'enter_a2r1', x: a2r1.x + a2r1.w / 2, y: a2r1.y + a2r1.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r1' && isRoomClear(s, 'a2r1') },
-        { label: 'door_a2r2', x: 14.5, y: 26.5, action: 'interact', doorKey: '14,26', doneWhen: (s) => (doors['14,26'] && doors['14,26'].openProgress >= 1) },
-        { label: 'enter_a2r2', x: a2r2.x + a2r2.w / 2, y: a2r2.y + a2r2.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r2' && isRoomClear(s, 'a2r2') },
-        { label: 'door_a2r1_a2r3', x: 19.5, y: 30.5, action: 'interact', doorKey: '19,30', doneWhen: (s) => (doors['19,30'] && doors['19,30'].openProgress >= 1) },
-        { label: 'enter_a2r3', x: a2r3.x + a2r3.w / 2, y: a2r3.y + a2r3.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r3' && isRoomClear(s, 'a2r3') },
-        { label: 'door_a2r4', x: 31.5, y: 36.5, action: 'interact', doorKey: '31,36', doneWhen: (s) => (doors['31,36'] && doors['31,36'].openProgress >= 1) },
-        { label: 'shotgun', x: shotgun.x, y: shotgun.y, action: 'interact', doneWhen: (s) => s.player.weapons && s.player.weapons.includes('SHOTGUN') },
-        { label: 'door_a2r5', x: 19.5, y: 42.5, action: 'interact', doorKey: '19,42', doneWhen: (s) => (doors['19,42'] && doors['19,42'].openProgress >= 1) },
-        { label: 'enter_a2r5', x: a2r5.x + a2r5.w / 2, y: a2r5.y + a2r5.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'a2r5' && isRoomClear(s, 'a2r5') },
-        { label: 'keydoor_boss', x: 19.5, y: 54.5, action: 'interact', doorKey: '19,54', doneWhen: (s) => (doors['19,54'] && doors['19,54'].openProgress >= 1) },
-        { label: 'voidbeam', x: voidbeam.x, y: voidbeam.y, action: 'interact', doneWhen: (s) => s.player.weapons && s.player.weapons.includes('VOIDBEAM') },
-        { label: 'enter_area3', x: a3.x + a3.w / 2, y: a3.y + a3.h / 2, doneWhen: (s) => getRoomId(s.player.x, s.player.y) === 'area3' && isRoomClear(s, 'area3') },
-        { label: 'light_well_boss', x: a3.x + a3.w / 2, y: a3.y + a3.h / 2 + 4, doneWhen: (s) => !!s.flags.voidBeamLightZoneUsed },
-    ];
-}
-
-/** True if the given room has no live enemies (so we can advance past "enter_room" step). */
-function isRoomClear(state, roomId) {
-    const entities = state.entities || [];
-    return !entities.some((e) => e.roomId === roomId && e.hp > 0);
-}
+// ── Scripted route (from ai-route framework + level data) ───────────────
+// Route is built once from moodLevel1 + worldApi. Same logic for any level:
+// succeeded OR past = done; no backtracking. See ai-route.js and levels/mood-level1.js.
 
 let SCRIPTED_ROUTE = null;
 function getScriptedRoute() {
-    if (!SCRIPTED_ROUTE) SCRIPTED_ROUTE = buildScriptedRoute();
+    if (!SCRIPTED_ROUTE) SCRIPTED_ROUTE = buildRoute(moodLevel1, worldApi);
     return SCRIPTED_ROUTE;
 }
 
-/** Index of first step that is not yet done. */
 function getCurrentScriptedStepIndex(state) {
-    const route = getScriptedRoute();
-    for (let i = 0; i < route.length; i++) {
-        if (!route[i].doneWhen(state)) return i;
-    }
-    return -1;
+    return getRouteStepIndex(getScriptedRoute(), state);
+}
+
+function stepToGoal(step) {
+    return routeStepToGoal(step, worldApi);
 }
 
 // ── Tile pathfinding (BFS) ───────────────────────────────────────────
@@ -162,15 +129,16 @@ function bfsPath(sx, sy, ex, ey) {
 }
 
 const PATH_CACHE_TTL = 0.5;
-let pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, time: -1 };
+let pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: -1 };
 let lastCachedStepIndex = -2;
 
 function invalidatePathCache() {
-    pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, time: -1 };
+    pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: -1 };
 }
 
-/** Path from player to goal; uses approach tile for doors/interact. Caches result for PATH_CACHE_TTL sec. */
+/** Path from player to goal; uses approach tile for doors/interact. Caches by (sx,sy,ex,ey,stepIndex) so we never reuse a path from a different scripted step. */
 function getPathToGoal(state, goal) {
+    const stepIndex = getCurrentScriptedStepIndex(state);
     const px = state.player.x;
     const py = state.player.y;
     const elapsed = state.time.elapsed || 0;
@@ -187,14 +155,17 @@ function getPathToGoal(state, goal) {
         ex = Math.floor(goal.x); ey = Math.floor(goal.y);
     }
 
-    if (pathCache.path && pathCache.sx === sx && pathCache.sy === sy && pathCache.ex === ex && pathCache.ey === ey && (elapsed - pathCache.time) < PATH_CACHE_TTL) {
-        return pathCache.path;
-    }
+    const cacheHit = pathCache.path
+        && pathCache.sx === sx && pathCache.sy === sy && pathCache.ex === ex && pathCache.ey === ey
+        && pathCache.stepIndex === stepIndex
+        && (elapsed - pathCache.time) < PATH_CACHE_TTL;
+    if (cacheHit) return pathCache.path;
+
     const path = bfsPath(sx, sy, ex, ey);
     if (path) {
-        pathCache = { path, sx, sy, ex, ey, time: elapsed };
+        pathCache = { path, sx, sy, ex, ey, stepIndex, time: elapsed };
     } else {
-        pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, time: elapsed };
+        pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: elapsed };
     }
     return path;
 }
@@ -272,13 +243,6 @@ function isInRangeAndFacing(px, py, pAngle, tx, ty, angleTolerance = INTERACTION
     return Math.abs(normalizeAngle(wantAngle - pAngle)) <= angleTolerance;
 }
 
-/** Turn a scripted step into a goal object for steering/action. */
-function stepToGoal(step) {
-    const g = { type: step.doorKey ? 'door' : (step.label || 'waypoint'), x: step.x, y: step.y };
-    if (step.action) g.action = step.action;
-    if (step.doorKey && doors[step.doorKey]) g.door = doors[step.doorKey];
-    return g;
-}
 
 /**
  * One goal per frame. Priority: visible enemy → current scripted step → fallback (nearest door / explore).
@@ -298,15 +262,15 @@ function getCurrentGoal(state) {
         return stepToGoal(route[stepIndex]);
     }
 
-    // 3) Fallback: nearest closed door we can open
-    const doorGoal = getNearestClosedDoor(state, 10);
-    if (doorGoal) return { type: 'door', x: doorGoal.x, y: doorGoal.y, action: 'interact', door: doorGoal.door };
-
-    // 4) Explore: go toward area1 if still in area0/hallway
+    // 3) Fallback: nearest closed door only when still in area0/hallway (never target a door behind us)
+    // 4) Explore: go toward level's explore fallback room (e.g. area1) if still in start area
     const room = getRoomId(p.x, p.y);
-    if (room === 'area0' || room === null) {
-        const a1 = ROOM_BOUNDS.area1;
-        if (a1) return { type: 'waypoint', x: a1.x + a1.w / 2, y: a1.y + a1.h / 2 };
+    const startRoomId = moodLevel1.roomOrder && moodLevel1.roomOrder[0];
+    if (room === startRoomId || room === null) {
+        const doorGoal = getNearestClosedDoor(state, 10);
+        if (doorGoal) return { type: 'door', x: doorGoal.x, y: doorGoal.y, action: 'interact', door: doorGoal.door };
+        const fallbackRoom = getExploreFallbackRoom(moodLevel1, worldApi);
+        if (fallbackRoom) return { type: 'waypoint', x: fallbackRoom.x + fallbackRoom.w / 2, y: fallbackRoom.y + fallbackRoom.h / 2 };
     }
 
     return null;

@@ -506,6 +506,7 @@ export function runSimulationTick(state, dt = FIXED_DT) {
     t.now += dt;
     t.elapsed += dt;
 
+    triggers.advanceDoorAnimations(state);
     objectives.updateObjectives(state);
     state.ai.active = true;
     ai.update(state);
