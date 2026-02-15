@@ -12,21 +12,21 @@ export const moodLevel1 = {
     steps: [
         { type: 'pickup', label: 'handgun', id: 'handgun', weaponId: 'HANDGUN', pastRoomId: 'area0' },
         { type: 'door', label: 'door_area0_hall', doorKey: '8,5', pastRoomId: 'area1', position: { x: 8.5, y: 5.5 } },
-        { type: 'enter_room', label: 'enter_area1', roomId: 'area1' },
+        { type: 'enter_room', label: 'enter_area1', roomId: 'area1', positionOffset: { dx: -6 } }, // entry from west (hallway)
         { type: 'button', label: 'button', id: 'area1Button', flagName: 'buttonPressed', pastRoomId: 'area1' },
         { type: 'door', label: 'gate_area2', doorKey: '19,15', pastRoomId: 'a2r1', position: { x: 19.5, y: 15.5 } },
         { type: 'enter_room', label: 'enter_a2r1', roomId: 'a2r1', positionOffset: { dy: -3 } }, // waypoint just inside north (entry) so we don't get stuck in corridor/alcoves
         { type: 'door', label: 'door_a2r2', doorKey: '14,26', pastRoomId: 'a2r2', position: { x: 14.5, y: 26.5 } },
-        { type: 'enter_room', label: 'enter_a2r2', roomId: 'a2r2' },
+        { type: 'enter_room', label: 'enter_a2r2', roomId: 'a2r2', positionOffset: { dx: 2 } }, // entry from east (a2r1)
         { type: 'door', label: 'door_a2r1_a2r3', doorKey: '19,30', pastRoomId: 'a2r3', position: { x: 19.5, y: 30.5 } },
-        { type: 'enter_room', label: 'enter_a2r3', roomId: 'a2r3' },
+        { type: 'enter_room', label: 'enter_a2r3', roomId: 'a2r3', positionOffset: { dy: -5 } }, // entry from north (a2r1)
         { type: 'door', label: 'door_a2r4', doorKey: '31,36', pastRoomId: 'a2r4', position: { x: 31.5, y: 36.5 } },
         { type: 'pickup', label: 'shotgun', id: 'shotgun', weaponId: 'SHOTGUN', pastRoomId: 'a2r4' },
         { type: 'door', label: 'door_a2r5', doorKey: '19,42', pastRoomId: 'a2r5', position: { x: 19.5, y: 42.5 } },
-        { type: 'enter_room', label: 'enter_a2r5', roomId: 'a2r5' },
+        { type: 'enter_room', label: 'enter_a2r5', roomId: 'a2r5', positionOffset: { dy: -3 } }, // entry from north
         { type: 'keydoor', label: 'keydoor_boss', doorKey: '19,54', pastRoomIds: ['bossCorridor', 'area3'], position: { x: 19.5, y: 54.5 } },
         { type: 'pickup', label: 'voidbeam', id: 'voidbeam', weaponId: 'VOIDBEAM', pastRoomId: 'a2r5' },
-        { type: 'enter_room', label: 'enter_area3', roomId: 'area3' },
+        { type: 'enter_room', label: 'enter_area3', roomId: 'area3', positionOffset: { dy: -2 } }, // entry from north (boss corridor)
         { type: 'waypoint', label: 'light_well_boss', roomId: 'area3', positionOffset: { dy: 4 }, flagName: 'voidBeamLightZoneUsed' },
     ],
 };

@@ -70,6 +70,7 @@ const COMBAT_RECENT_ENEMY_GRACE = 0.6; // Keep targeting enemy for this long wit
 const STUCK_NO_PROGRESS_THRESHOLD = 1.2;  // seconds
 const STUCK_PROGRESS_MIN = 0.2;           // tiles improvement per check to count as progress
 const BACKUP_DURATION = 0.55;             // seconds to back up + wiggle when stuck
+const NULL_PATH_STUCK_THRESHOLD = 0.8;    // if path is null for this long (nav goal), treat as stuck
 
 // ── List of goals (scripted route from ai-route framework + level data) ─
 // Order: spawn → handgun → first door → next room → kill enemies → button → door → next room → …
@@ -200,8 +201,10 @@ function getPathToGoal(state, goal) {
     const path = bfsPath(sx, sy, ex, ey);
     if (path) {
         pathCache = { path, sx, sy, ex, ey, stepIndex, time: elapsed };
+        state.ai._pathWasNull = false;
     } else {
         pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: elapsed };
+        state.ai._pathWasNull = true;
     }
     return path;
 }
@@ -297,15 +300,35 @@ function isInRangeAndFacing(px, py, pAngle, tx, ty, angleTolerance = INTERACTION
 
 
 /**
- * One goal per frame. Priority: visible enemy → current scripted step → fallback (nearest door / explore).
+ * One goal per frame. See AI-BEHAVIOR.md for the full contract.
+ *
+ * Priority:
+ * 1. Visible enemy (we have LOS) — always valid.
+ * 2. Recent enemy (combat memory) — invalid if current step is a door and we have no LOS (open door first).
+ * 3. Effective scripted step (first not done; never an open door).
+ * 4. Fallback only in area0: nearest closed door, else explore toward area1.
+ *
  * @returns {{ type: string, x: number, y: number, action?: string, entity?: object, door?: object } | null}
  */
 function getCurrentGoal(state) {
     const p = state.player;
+    const stepIndex = getEffectiveCurrentStepIndex(state);
+    const route = getScriptedRoute();
+    const currentStep = stepIndex >= 0 ? route[stepIndex] : null;
+    const isDoorStep = currentStep && currentStep.doorKey;
 
-    // 1) Combat: nearest visible enemy, or recent enemy (combat memory so we don't rescans when LOS flickers)
+    // 1) Combat: nearest visible enemy, or recent enemy (combat memory) — but if we only have recent enemy (no LOS) and current step is a door, prefer opening the door so we can reach them
     let enemy = getNearestVisibleEnemy(state);
+    const haveVisibleEnemy = !!enemy;
     if (!enemy) enemy = getRecentEnemyIfValid(state);
+    if (enemy) {
+        const haveLOS = haveVisibleEnemy || hasLineOfSight(p.x, p.y, enemy.x, enemy.y);
+        if (isDoorStep && !haveLOS) {
+            // Enemy is behind the door; open the door first instead of shooting at the wall
+            enemy = null;
+            state.ai.lastEnemyTargetId = null;
+        }
+    }
     if (enemy) {
         state.ai.lastEnemyTargetId = enemy.id;
         state.ai.lastEnemyTime = state.time.elapsed || 0;
@@ -314,9 +337,7 @@ function getCurrentGoal(state) {
     state.ai.lastEnemyTargetId = null;
 
     // 2) List of goals: first step not done and (if door) still interactable — never target an open door
-    const stepIndex = getEffectiveCurrentStepIndex(state);
     if (stepIndex >= 0) {
-        const route = getScriptedRoute();
         return stepToGoal(route[stepIndex]);
     }
 
@@ -398,6 +419,19 @@ function steerToward(state, goal) {
             inp.lookDY = 0;
             return;
         }
+        // Null path: BFS returned no path to goal; don't steer at goal forever
+        if (ai._pathWasNull) {
+            ai._nullPathTime = (ai._nullPathTime || 0) + dt;
+            if (ai._nullPathTime >= NULL_PATH_STUCK_THRESHOLD) {
+                invalidatePathCache();
+                ai._backUpUntil = elapsed + BACKUP_DURATION;
+                ai._nullPathTime = 0;
+                ai._replanCount = (ai._replanCount || 0) + 1;
+            }
+        } else {
+            ai._nullPathTime = 0;
+        }
+
         const atWaypoint = distToTarget < PATH_REACH_DIST * 2;
         const lastDist = ai._lastSteerTargetDist;
         if (lastDist != null && !atWaypoint) {
@@ -418,6 +452,7 @@ function steerToward(state, goal) {
     } else {
         state.ai._lastSteerTargetDist = distToTarget;
         state.ai._stuckNoProgressTime = 0;
+        state.ai._nullPathTime = 0;
     }
 
     // ── Aim: always turn toward target (like a player moving the mouse). Never stop aiming when we have a goal. ──
