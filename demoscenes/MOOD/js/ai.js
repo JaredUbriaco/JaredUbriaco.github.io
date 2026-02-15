@@ -87,7 +87,8 @@ const NULL_PATH_STUCK_THRESHOLD = 0.8;    // if path is null for this long (nav 
 const INTERACT_NULL_PATH_SAFE_DIST = 6;   // within this many tiles of door/button, never replan for null path (just walk there)
 const DOOR_STUCK_TIME = 6;               // at door in range AND facing, this long without opening → backup and re-approach
 const STUCK_APPROACHING_INTERACT = 3;    // approaching door/button but not in range and no progress this long → backup (escape corner)
-const NEAR_TARGET_NO_REPLAN_DIST = 2;    // within this many tiles of goal: don't trigger stuck/replan (just walk to it)
+const NEAR_TARGET_NO_REPLAN_DIST = 2;    // within this many tiles of steer target: don't trigger stuck/replan
+const NEAR_DOOR_NO_STUCK_APPROACHING = 4; // within this many tiles of door/button: never "stuck approaching" (just walk there)
 const DOOR_FALLBACK_AFTER_ATTEMPTS = 5;   // after this many door backup cycles, log FAILURE/FALLBACK
 
 // ── List of goals (scripted route from ai-route framework + level data) ─
@@ -639,7 +640,8 @@ function steerToward(state, goal) {
             ai._stuckApproachingInteractTime = 0;
         }
         const lastDist = ai._lastSteerTargetDist;
-        // For interact goals, also count progress toward the interaction point (door/button), not just steer target.
+        const madeProgressTowardSteerTarget = lastDist != null && distToTarget < lastDist - STUCK_PROGRESS_MIN;
+        // For interact goals, count progress toward BOTH door/button AND steer target (path). So following the path counts as progress.
         const isInteract = isInteractGoal(goal);
         const interactX = isInteract && (goal.door ? goal.door.cx : goal.x);
         const interactY = isInteract && (goal.door ? goal.door.cy : goal.y);
@@ -647,13 +649,13 @@ function steerToward(state, goal) {
         const lastInteractDist = ai._lastInteractDist;
         const madeProgressTowardInteract = isInteract && (lastInteractDist != null && distToInteract < lastInteractDist - STUCK_PROGRESS_MIN);
         if (isInteract) ai._lastInteractDist = distToInteract; else ai._lastInteractDist = undefined;
+        const madeProgress = madeProgressTowardSteerTarget || (isInteract && madeProgressTowardInteract);
 
-        // For interact goals (button, door, pickup): never replan for "no progress" toward steer target — jitter causes false positives.
-        // Replan on: null path, door-stuck (at door 6s without opening), or stuck approaching (near but not in range, no progress 3s — e.g. corner).
+        // For interact goals: replan only on null path, door-stuck, or stuck approaching (no progress toward path OR door for 3s).
         const committedToInteract = isInteract && distToInteract <= COMMIT_TO_INTERACT_DIST;
         if (committedToInteract) ai._stuckNoProgressTime = 0;
         if (isInteract && !atDoorInRange) {
-            if (madeProgressTowardInteract) {
+            if (madeProgress || distToInteract < NEAR_DOOR_NO_STUCK_APPROACHING) {
                 ai._stuckApproachingInteractTime = 0;
             } else {
                 ai._stuckApproachingInteractTime = (ai._stuckApproachingInteractTime || 0) + dt;
