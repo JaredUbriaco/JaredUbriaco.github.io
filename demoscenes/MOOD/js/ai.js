@@ -46,7 +46,7 @@ const worldApi = createMoodLevel1WorldApi(map);
 // combatBackUpDist: when enemy closer than this (tiles), back up instead of strafe (create separation).
 export const AI_TUNING = {
     combatMaxRange: 12,
-    combatNoAdvanceDist: 3,
+    combatNoAdvanceDist: 2,   // stop advancing only when close; follow and close in before standoff
     combatBackUpDist: 1.5,
     combatPointBlankDist: 2,
     turnGain: 10,
@@ -651,8 +651,8 @@ function steerToward(state, goal) {
                 inp.strafeRight = dir === 1;
             }
         } else {
-            // Advancing: move forward + circle-strafe toward enemy (diagonal movement while aiming)
-            inp.moveForward = true;
+            // Advancing: move forward + circle-strafe toward enemy; don't walk into walls (strafe around edges)
+            inp.moveForward = !isPathBlocked(p.x, p.y, p.angle);
             inp.moveBack = false;
             const side = angleDiff;
             let dir = state.ai._combatStrafeDir;
@@ -701,7 +701,8 @@ function performAction(state, goal) {
         const dist = distanceTo(p.x, p.y, goal.x, goal.y);
         const wantAngle = angleTo(p.x, p.y, goal.x, goal.y);
         const aimTolerance = dist <= COMBAT_POINT_BLANK_DIST ? COMBAT_FACING_TOLERANCE_CLOSE : COMBAT_FACING_TOLERANCE;
-        if (dist <= COMBAT_MAX_RANGE && Math.abs(normalizeAngle(wantAngle - p.angle)) <= aimTolerance) {
+        const canHit = hasLineOfSight(p.x, p.y, goal.x, goal.y);
+        if (canHit && dist <= COMBAT_MAX_RANGE && Math.abs(normalizeAngle(wantAngle - p.angle)) <= aimTolerance) {
             inp.fire = true;
         }
     }
