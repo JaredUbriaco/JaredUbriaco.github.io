@@ -1,6 +1,8 @@
 # AI route levels
 
-Scripted route **data** for the ai-route framework. The same logic (succeeded OR past = done, no backtracking) applies to every level.
+Scripted route **data** for the ai-route framework: a **list of goals** in order (spawn → handgun → first door → next room → kill enemies → button → door → …). Same logic for every level; number of rooms, doors, and branches varies.
+
+**Universal rule:** A door or gate that can no longer be interacted with (already open) is never a valid goal. The engine skips such steps when choosing the current goal, so the AI never goes back to an open door or spins there.
 
 ## Adding a new level
 

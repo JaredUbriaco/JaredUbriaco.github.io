@@ -1,15 +1,19 @@
 /**
  * ai-route.js — Level-agnostic scripted route framework
  *
- * One rule for all things: if we succeeded at an interaction (door opened, button pressed,
- * pickup taken, room cleared), we are past it — never target it again. No backtracking unless
- * the level has an explicit "return to X" objective or a room wasn't fully cleared.
+ * The route is a list of goals in order: spawn → pickup → door → enter room → kill enemies →
+ * button → door → next room → … (branching: two directions, two doors, etc.). Same structure
+ * for any level; number of rooms/doors/branches varies.
+ *
+ * Rules:
+ * - If we succeeded at an interaction (door opened, button pressed, pickup taken, room cleared),
+ *   we are past it — never target it again. No backtracking unless the level explicitly requires it.
+ * - A door or gate that can no longer be interacted with (already open) is never a valid goal.
+ *   The engine skips such steps when choosing the current goal (see ai.js getEffectiveCurrentStepIndex).
  *
  * Branching: clear each branch, return to hub, then take the door that leads forward.
  *
  * This module is independent of any specific map. It needs a world API and level data.
- * Use buildRoute(levelData, worldApi) to get a route; then use getCurrentScriptedStepIndex,
- * stepToGoal, and isRoomClear with that route and state.
  */
 
 // ── Contract: world API (inject from map/level) ────────────────────────
@@ -76,13 +80,14 @@ function buildDoneWhen(step, levelData, worldApi) {
                 (step.weaponId && s.player.weapons && s.player.weapons.includes(step.weaponId)) ||
                 (step.pastRoomId && past(s, step.pastRoomId));
         case 'door':
+            // Done if door open OR we're in the destination room OR we're past it (e.g. in a2r1 when destination was area1)
             return (s) =>
                 (doors[step.doorKey] && doors[step.doorKey].openProgress >= 1) ||
-                (step.pastRoomId && inRoom(s, step.pastRoomId));
+                (step.pastRoomId && (inRoom(s, step.pastRoomId) || past(s, step.pastRoomId)));
         case 'keydoor':
             return (s) =>
                 (doors[step.doorKey] && doors[step.doorKey].openProgress >= 1) ||
-                (step.pastRoomIds && step.pastRoomIds.some((id) => inRoom(s, id)));
+                (step.pastRoomIds && step.pastRoomIds.some((id) => inRoom(s, id) || past(s, id)));
         case 'button':
             return (s) =>
                 !!(step.flagName && s.flags && s.flags[step.flagName]) ||

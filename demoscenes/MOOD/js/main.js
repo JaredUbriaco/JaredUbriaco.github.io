@@ -86,6 +86,9 @@ const state = {
         idleTimer: 0,
         currentTarget: null,
         waypointPath: [],
+        /** Combat memory: keep targeting recent enemy briefly without LOS so we don't rescans */
+        lastEnemyTargetId: null,
+        lastEnemyTime: 0,
         /** Telemetry for debug: state, targetId, confidence, stuckTimer, replanCount */
         telemetry: {},
         input: {          // Synthetic input from AI

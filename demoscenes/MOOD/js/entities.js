@@ -11,6 +11,7 @@ import { ENEMIES, AGGRO_PROPAGATION_RANGE } from './config.js';
 import { isSolid, getRoomId, ROOM_BOUNDS, ENEMY_SPAWNS } from './map.js';
 
 // ── Entity Factory Functions ────────────────────────────────────────
+let nextEntityId = 0;
 
 /**
  * Create a Glimmer entity.
@@ -18,6 +19,7 @@ import { isSolid, getRoomId, ROOM_BOUNDS, ENEMY_SPAWNS } from './map.js';
 export function createGlimmer(x, y, roomId) {
     const stats = ENEMIES.GLIMMER;
     return {
+        id: nextEntityId++,
         type: 'GLIMMER',
         x, y,
         hp: stats.hp,
@@ -46,6 +48,7 @@ export function createGlimmer(x, y, roomId) {
 export function createPhantom(x, y, roomId) {
     const stats = ENEMIES.PHANTOM;
     return {
+        id: nextEntityId++,
         type: 'PHANTOM',
         x, y,
         hp: stats.hp,
@@ -82,6 +85,7 @@ export function createPhantom(x, y, roomId) {
 export function createPrism(x, y, roomId) {
     const stats = ENEMIES.PRISM;
     return {
+        id: nextEntityId++,
         type: 'PRISM',
         x, y,
         hp: stats.hp,
@@ -109,6 +113,7 @@ export function createPrism(x, y, roomId) {
 export function createBoss(x, y, roomId) {
     const stats = ENEMIES.BOSS;
     return {
+        id: nextEntityId++,
         type: 'BOSS',
         x, y,
         hp: stats.hp,

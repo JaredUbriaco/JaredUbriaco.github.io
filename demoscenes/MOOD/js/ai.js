@@ -46,8 +46,8 @@ export const AI_TUNING = {
     aimDeadZone: 0.02,
     noOvershootFrac: 0.9,
     facingTolerance: 0.2,
-    combatFacingTolerance: 0.05,
-    combatFacingToleranceClose: 0.09,
+    combatFacingTolerance: 0.065,      // slightly looser so we fire sooner, less aim jitter
+    combatFacingToleranceClose: 0.12,  // point-blank: fire more readily when very close
     interactFacingTolerance: INTERACTION_ANGLE,
     pathReachDist: 0.4,
 };
@@ -64,10 +64,15 @@ const COMBAT_POINT_BLANK_DIST = AI_TUNING.combatPointBlankDist;
 const AIM_DEAD_ZONE = AI_TUNING.aimDeadZone;
 const NO_OVERSHOOT_FRAC = AI_TUNING.noOvershootFrac;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
+const COMBAT_RECENT_ENEMY_GRACE = 0.6; // Keep targeting enemy for this long without LOS so we don't rescans
 
-// ── Scripted route (from ai-route framework + level data) ───────────────
-// Route is built once from moodLevel1 + worldApi. Same logic for any level:
-// succeeded OR past = done; no backtracking. See ai-route.js and levels/mood-level1.js.
+// ── List of goals (scripted route from ai-route framework + level data) ─
+// Order: spawn → handgun → first door → next room → kill enemies → button → door → next room → …
+// Branching: clear room, then choose next door; repeat. Same logic for any level.
+//
+// Universal rule: a door or gate that can no longer be interacted with (already open) is NEVER
+// a valid goal. We skip such steps when choosing the current goal so the AI never goes back
+// to an open door or spins there.
 
 let SCRIPTED_ROUTE = null;
 function getScriptedRoute() {
@@ -75,8 +80,24 @@ function getScriptedRoute() {
     return SCRIPTED_ROUTE;
 }
 
+/** Raw index of first step where doneWhen(state) is false. */
 function getCurrentScriptedStepIndex(state) {
     return getRouteStepIndex(getScriptedRoute(), state);
+}
+
+/**
+ * Effective current step: first step that is not done AND (if it's a door step) the door
+ * is still interactable (not open). Ensures we never target an open door/gate.
+ */
+function getEffectiveCurrentStepIndex(state) {
+    const route = getScriptedRoute();
+    for (let i = 0; i < route.length; i++) {
+        if (route[i].doneWhen(state)) continue;
+        const step = route[i];
+        if (step.doorKey && doors[step.doorKey] && doors[step.doorKey].openProgress >= 1) continue;
+        return i;
+    }
+    return -1;
 }
 
 function stepToGoal(step) {
@@ -138,7 +159,7 @@ function invalidatePathCache() {
 
 /** Path from player to goal; uses approach tile for doors/interact. Caches by (sx,sy,ex,ey,stepIndex) so we never reuse a path from a different scripted step. */
 function getPathToGoal(state, goal) {
-    const stepIndex = getCurrentScriptedStepIndex(state);
+    const stepIndex = getEffectiveCurrentStepIndex(state);
     const px = state.player.x;
     const py = state.player.y;
     const elapsed = state.time.elapsed || 0;
@@ -212,6 +233,22 @@ function getNearestVisibleEnemy(state) {
     return nearest;
 }
 
+/** If we had a recent enemy target and they're still in range and alive, return them (combat memory so we don't rescans). */
+function getRecentEnemyIfValid(state) {
+    const ai = state.ai;
+    const elapsed = state.time.elapsed || 0;
+    if (ai.lastEnemyTargetId == null || (elapsed - ai.lastEnemyTime) > COMBAT_RECENT_ENEMY_GRACE) return null;
+    const entities = state.entities || [];
+    const p = state.player;
+    for (const e of entities) {
+        if (e.id !== ai.lastEnemyTargetId || e.hp <= 0) continue;
+        const d = distanceTo(p.x, p.y, e.x, e.y);
+        if (d > COMBAT_MAX_RANGE) return null;
+        return e;
+    }
+    return null;
+}
+
 /** Closed door we can open (not locked, or button locked and button pressed). */
 function canOpenDoor(state, door) {
     if (door.openProgress >= 1) return false;
@@ -251,12 +288,18 @@ function isInRangeAndFacing(px, py, pAngle, tx, ty, angleTolerance = INTERACTION
 function getCurrentGoal(state) {
     const p = state.player;
 
-    // 1) Combat: nearest visible enemy
-    const enemy = getNearestVisibleEnemy(state);
-    if (enemy) return { type: 'enemy', x: enemy.x, y: enemy.y, action: 'fire', entity: enemy };
+    // 1) Combat: nearest visible enemy, or recent enemy (combat memory so we don't rescans when LOS flickers)
+    let enemy = getNearestVisibleEnemy(state);
+    if (!enemy) enemy = getRecentEnemyIfValid(state);
+    if (enemy) {
+        state.ai.lastEnemyTargetId = enemy.id;
+        state.ai.lastEnemyTime = state.time.elapsed || 0;
+        return { type: 'enemy', x: enemy.x, y: enemy.y, action: 'fire', entity: enemy };
+    }
+    state.ai.lastEnemyTargetId = null;
 
-    // 2) Scripted route: first step that is not yet done
-    const stepIndex = getCurrentScriptedStepIndex(state);
+    // 2) List of goals: first step not done and (if door) still interactable — never target an open door
+    const stepIndex = getEffectiveCurrentStepIndex(state);
     if (stepIndex >= 0) {
         const route = getScriptedRoute();
         return stepToGoal(route[stepIndex]);
@@ -304,7 +347,7 @@ function getSteerTarget(state, goal) {
     return { x: goal.x, y: goal.y };
 }
 
-/** Set state.ai.input so we turn and move toward target (next path step or goal). */
+/** Set state.ai.input: aim at target and move in any combination of directions (multimodal: move + aim + fire at once). */
 function steerToward(state, goal) {
     if (!goal) return;
     const p = state.player;
@@ -312,48 +355,59 @@ function steerToward(state, goal) {
     const target = getSteerTarget(state, goal);
     const wantAngle = angleTo(p.x, p.y, target.x, target.y);
     const angleDiff = normalizeAngle(wantAngle - p.angle);
+    const distToTarget = distanceTo(p.x, p.y, target.x, target.y);
 
+    // ── Aim: always turn toward target (like a player moving the mouse). Never stop aiming when we have a goal. ──
     if (Math.abs(angleDiff) <= AIM_DEAD_ZONE) {
         inp.lookDX = 0;
     } else {
-        let lookDX = angleDiff * TURN_GAIN;
+        const isCombat = goal.type === 'enemy' || goal.action === 'fire';
+        const turnGain = isCombat ? TURN_GAIN * 1.2 : TURN_GAIN; // Slightly faster track in combat
+        let lookDX = angleDiff * turnGain;
         const maxTurnPerFrame = (Math.abs(angleDiff) * NO_OVERSHOOT_FRAC) / MOUSE_SENSITIVITY;
         lookDX = Math.max(-maxTurnPerFrame, Math.min(maxTurnPerFrame, lookDX));
         inp.lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, lookDX));
     }
     inp.lookDY = 0;
 
-    const distToTarget = distanceTo(p.x, p.y, target.x, target.y);
-    const inCombatStandoff = (goal.type === 'enemy' || goal.action === 'fire') && distToTarget <= COMBAT_NO_ADVANCE_DIST;
+    // ── Movement: allow any combination of forward/back/strafe (diagonal movement like W+A). ──
+    const isCombat = goal.type === 'enemy' || goal.action === 'fire';
+    const inCombatStandoff = isCombat && distToTarget <= COMBAT_NO_ADVANCE_DIST;
 
-    if (inCombatStandoff) {
-        inp.moveForward = false;
-        if (distToTarget < COMBAT_BACK_UP_DIST) {
-            inp.moveBack = true;
-            inp.strafeLeft = false;
-            inp.strafeRight = false;
+    if (isCombat) {
+        if (inCombatStandoff) {
+            inp.moveForward = false;
+            if (distToTarget < COMBAT_BACK_UP_DIST) {
+                inp.moveBack = true;
+                inp.strafeLeft = false;
+                inp.strafeRight = false;
+            } else {
+                inp.moveBack = false;
+                const phase = Math.floor((state.time.elapsed || 0) / 2.5) % 2;
+                inp.strafeLeft = phase === 0;
+                inp.strafeRight = phase === 1;
+            }
         } else {
+            // Advancing: move forward + circle-strafe toward enemy (diagonal movement while aiming)
+            inp.moveForward = true;
             inp.moveBack = false;
-            const phase = Math.floor((state.time.elapsed || 0) / 1.2) % 2;
-            inp.strafeLeft = phase === 0;
-            inp.strafeRight = phase === 1;
+            const side = angleDiff; // positive = enemy to our left (we want to strafe right to orbit)
+            inp.strafeLeft = side < -0.15;
+            inp.strafeRight = side > 0.15;
         }
         return;
     }
 
-    const aligned = Math.abs(angleDiff) <= FACING_TOLERANCE;
-    if (aligned && !isPathBlocked(p.x, p.y, p.angle)) {
-        inp.moveForward = true;
-        inp.strafeLeft = false;
-        inp.strafeRight = false;
-    } else if (aligned && isPathBlocked(p.x, p.y, p.angle)) {
+    // Navigation: move in the direction of the target (forward and/or strafe = diagonal)
+    const forwardComponent = Math.cos(angleDiff);
+    const rightComponent = Math.sin(angleDiff);
+    const thresh = 0.2;
+    inp.moveForward = forwardComponent > thresh && !isPathBlocked(p.x, p.y, p.angle);
+    inp.moveBack = forwardComponent < -thresh;
+    inp.strafeRight = rightComponent > thresh;
+    inp.strafeLeft = rightComponent < -thresh;
+    if (inp.moveBack && (inp.strafeLeft || inp.strafeRight)) {
         inp.moveForward = false;
-        inp.strafeLeft = true;
-        inp.strafeRight = false;
-    } else {
-        inp.moveForward = false;
-        inp.strafeLeft = false;
-        inp.strafeRight = false;
     }
 }
 
@@ -407,7 +461,7 @@ export function update(state) {
     const inp = state.ai.input;
     resetAiInput(inp);
 
-    const stepIndex = getCurrentScriptedStepIndex(state);
+    const stepIndex = getEffectiveCurrentStepIndex(state);
     if (stepIndex !== lastCachedStepIndex) {
         invalidatePathCache();
         lastCachedStepIndex = stepIndex;
