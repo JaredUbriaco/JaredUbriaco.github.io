@@ -15,13 +15,14 @@ import {
     PITCH_SCALE, DOOR_RECESS_DEPTH,
 } from './config.js';
 
-import { getTile, isSolid, doors, INTERACTABLE_POSITIONS } from './map.js';
+import { getTile, isSolid, doors, INTERACTABLE_POSITIONS, getRoomId } from './map.js';
+import { getRoomLighting, applyLightingToLuminance, blendWarmHue } from './lighting.js';
 
 // ── Z-Buffer (shared with sprite renderer) ──────────────────────────
 export const zBuffer = new Float32Array(INTERNAL_WIDTH);
 
 // ── Wall Color Palette (HSL-based, varies by tile type) ─────────────
-function getWallColor(tileType, hitSide, distance) {
+function getWallColor(tileType, hitSide, distance, lighting) {
     let h, s, l;
 
     switch (tileType) {
@@ -58,9 +59,13 @@ function getWallColor(tileType, hitSide, distance) {
         l *= 0.7; // N/S walls are darker
     }
 
-    // Distance fog: darken with distance
-    const fogFactor = 1 / (1 + distance * 0.25);
-    l *= fogFactor;
+    if (lighting) {
+        l = applyLightingToLuminance(l, lighting, 'wall');
+        h = blendWarmHue(h, lighting);
+    } else {
+        const fogFactor = 1 / (1 + distance * 0.25);
+        l *= fogFactor;
+    }
 
     return `hsl(${h}, ${s}%, ${Math.max(2, l)}%)`;
 }
@@ -76,23 +81,41 @@ function isButtonWallHit(hit) {
 }
 
 // ── Ceiling & Floor Colors ──────────────────────────────────────────
-function getCeilingColor(distance) {
-    const fogFactor = 1 / (1 + distance * 0.3);
-    const l = 12 * fogFactor;
-    return `hsl(240, 30%, ${Math.max(1, l)}%)`;
+function getCeilingColor(distance, lighting) {
+    let l = 18;
+    if (lighting) {
+        l = applyLightingToLuminance(l, lighting, 'ceiling');
+    } else {
+        const fogFactor = 1 / (1 + distance * 0.3);
+        l = 12 * fogFactor;
+    }
+    const h = lighting ? blendWarmHue(240, lighting) : 240;
+    return `hsl(${h}, 30%, ${Math.max(1, l)}%)`;
 }
 
-function getFloorColor(distance) {
-    const fogFactor = 1 / (1 + distance * 0.3);
-    const l = 10 * fogFactor;
-    return `hsl(270, 20%, ${Math.max(1, l)}%)`;
+function getFloorColor(distance, lighting) {
+    let l = lighting?.lightWellRoom ? 22 : 16;
+    if (lighting) {
+        l = applyLightingToLuminance(l, lighting, 'floor');
+    } else {
+        const fogFactor = 1 / (1 + distance * 0.3);
+        l = 10 * fogFactor;
+    }
+    const h = lighting ? blendWarmHue(270, lighting) : 270;
+    return `hsl(${h}, 20%, ${Math.max(1, l)}%)`;
 }
 
 /** Darker shade for door/gate recess (set-back frame) so the panel reads as mounted from both sides. */
-function getRecessColor(distance) {
-    const fogFactor = 1 / (1 + distance * 0.25);
-    const l = 6 * fogFactor;
-    return `hsl(240, 25%, ${Math.max(1, l)}%)`;
+function getRecessColor(distance, lighting) {
+    let l = 6;
+    if (lighting) {
+        l = applyLightingToLuminance(l, lighting, 'wall');
+    } else {
+        const fogFactor = 1 / (1 + distance * 0.25);
+        l *= fogFactor;
+    }
+    const h = lighting ? blendWarmHue(240, lighting) : 240;
+    return `hsl(${h}, 25%, ${Math.max(1, l)}%)`;
 }
 
 // ── Cast Single Ray (DDA) ───────────────────────────────────────────
@@ -217,9 +240,13 @@ function castRay(ox, oy, angle) {
  * @param {CanvasRenderingContext2D} ctx
  * @param {{ x: number, y: number, angle: number, pitch: number, fov: number }} player
  * @param {number} timeNow - timestamp for breathing walls
+ * @param {{ debug?: { useLegacyLighting?: boolean } }} state - for lighting toggle (L key)
  */
-export function renderWalls(ctx, player, timeNow) {
+export function renderWalls(ctx, player, timeNow, state) {
     const { x: px, y: py, angle, pitch, fov } = player;
+    const useLegacy = state?.debug?.useLegacyLighting ?? false;
+    const roomId = getRoomId(px, py);
+    const lighting = getRoomLighting(roomId, timeNow, useLegacy);
 
     // Breathing wall modulation
     const breathe = 1 + BREATHING_AMPLITUDE * Math.sin(timeNow * BREATHING_SPEED);
@@ -266,7 +293,7 @@ export function renderWalls(ctx, player, timeNow) {
         // ── Draw Ceiling (above frame) ───────────────────────────
         if (wallTop > 0) {
             const ceilDist = correctedDist * 0.8;
-            ctx.fillStyle = getCeilingColor(ceilDist);
+            ctx.fillStyle = getCeilingColor(ceilDist, lighting);
             ctx.fillRect(col, 0, 1, Math.max(0, wallTop));
         }
 
@@ -274,31 +301,31 @@ export function renderWalls(ctx, player, timeNow) {
         if (isDoor) {
             // Recess band above panel (frame visible above door)
             if (panelTop > wallTop && panelTop > 0) {
-                ctx.fillStyle = getRecessColor(correctedDist);
+                ctx.fillStyle = getRecessColor(correctedDist, lighting);
                 ctx.fillRect(col, Math.max(0, wallTop), 1, Math.min(panelTop, INTERNAL_HEIGHT) - Math.max(0, wallTop));
             }
             // Door/gate panel (recessed, centered in frame)
             const clampedPanelTop = Math.max(0, panelTop);
             const clampedPanelBottom = Math.min(INTERNAL_HEIGHT, panelBottom);
             if (clampedPanelBottom > clampedPanelTop) {
-                let color = getWallColor(hit.wallType, hit.hitSide, recessDist);
+                let color = getWallColor(hit.wallType, hit.hitSide, recessDist, lighting);
                 if (hit.wallX !== undefined) {
                     const slat = Math.floor(hit.wallX * 8) % 2;
-                    if (slat === 0) color = getWallColor(hit.wallType, hit.hitSide, recessDist * 1.25);
+                    if (slat === 0) color = getWallColor(hit.wallType, hit.hitSide, recessDist * 1.25, lighting);
                 }
                 ctx.fillStyle = color;
                 ctx.fillRect(col, clampedPanelTop, 1, clampedPanelBottom - clampedPanelTop);
             }
             // Recess band below panel
             if (panelBottom < wallBottom && wallBottom < INTERNAL_HEIGHT) {
-                ctx.fillStyle = getRecessColor(correctedDist);
+                ctx.fillStyle = getRecessColor(correctedDist, lighting);
                 ctx.fillRect(col, Math.max(0, panelBottom), 1, Math.min(wallBottom, INTERNAL_HEIGHT) - Math.max(0, panelBottom));
             }
         } else {
             const clampedTop = Math.max(0, hit.wallType === TILE.BUTTON ? panelTop : wallTop);
             const clampedBottom = Math.min(INTERNAL_HEIGHT, hit.wallType === TILE.BUTTON ? panelBottom : wallBottom);
             if (clampedBottom > clampedTop) {
-                let color = getWallColor(hit.wallType, hit.hitSide, correctedDist);
+                let color = getWallColor(hit.wallType, hit.hitSide, correctedDist, lighting);
                 ctx.fillStyle = color;
                 ctx.fillRect(col, clampedTop, 1, clampedBottom - clampedTop);
                 if (isButtonWallHit(hit) && hit.wallX > 0.34 && hit.wallX < 0.66) {
@@ -321,7 +348,7 @@ export function renderWalls(ctx, player, timeNow) {
         // ── Draw Floor (below frame) ─────────────────────────────
         if (wallBottom < INTERNAL_HEIGHT) {
             const floorDist = correctedDist * 0.8;
-            ctx.fillStyle = getFloorColor(floorDist);
+            ctx.fillStyle = getFloorColor(floorDist, lighting);
             ctx.fillRect(col, Math.max(0, wallBottom), 1, INTERNAL_HEIGHT - Math.max(0, wallBottom));
         }
     }

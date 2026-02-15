@@ -288,7 +288,7 @@ export function draw(state, ctx) {
     ctx.fillRect(0, 0, INTERNAL_WIDTH, INTERNAL_HEIGHT);
 
     // ── 2. Raycaster: Walls + Floor + Ceiling ───────────────────
-    renderWalls(ctx, player, time.now);
+    renderWalls(ctx, player, time.now, state);
 
     // ── 2.5 Boss Arena Floor Overlay ─────────────────────────────
     drawBossArenaFloor(ctx, state);

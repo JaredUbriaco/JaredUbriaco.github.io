@@ -7,7 +7,7 @@
 
 import {
     INTERNAL_WIDTH, INTERNAL_HEIGHT,
-    PLAYER_FOV, DT_CAP, TOTAL_ENEMIES
+    PLAYER_FOV, DT_CAP, TOTAL_ENEMIES, DEBUG_TOGGLE_LIGHT
 } from './config.js';
 
 import * as input from './input.js';
@@ -127,6 +127,10 @@ const state = {
         screenShake: 0,
         distortion: 0,
         victoryAlpha: 0,
+    },
+    debug: {
+        /** When true, use legacy raycaster lighting (no room ambient, no breathing). Toggle with L key. */
+        useLegacyLighting: DEBUG_TOGGLE_LIGHT,
     },
 };
 
@@ -289,6 +293,11 @@ function gameLoop(timestamp) {
 
     // ── Step 1: Input ───────────────────────────────────────────
     input.update(dt);
+
+    if (input.consumeLightingToggle() && state.flags.started) {
+        state.debug.useLegacyLighting = !state.debug.useLegacyLighting;
+        console.log('[Lighting] useLegacyLighting =', state.debug.useLegacyLighting, state.debug.useLegacyLighting ? '(legacy: no room ambient, no breathing)' : '(new lighting)');
+    }
 
     // Check for pause trigger
     if (input.shouldPause() && state.flags.started && !state.flags.paused) {

@@ -8,6 +8,8 @@
 
 import { INTERNAL_WIDTH, INTERNAL_HEIGHT, PLAYER_FOV, PROJECTION_PLANE, PITCH_SCALE } from './config.js';
 import { zBuffer } from './raycaster.js';
+import { getRoomId } from './map.js';
+import { getRoomLighting } from './lighting.js';
 
 // ── Camera Plane (perpendicular to direction, scaled by FOV) ────────
 // The camera plane defines the width of the view frustum.
@@ -128,13 +130,13 @@ export function renderAll(ctx, state) {
 
     // ── Draw each sprite ────────────────────────────────────────
     for (const s of transformed) {
-        drawSprite(ctx, s, state.time);
+        drawSprite(ctx, s, state);
     }
 }
 
 // ── Draw Single Sprite with Z-Buffer Clipping ───────────────────────
 
-function drawSprite(ctx, s, time) {
+function drawSprite(ctx, s, state) {
     const startX = Math.max(0, Math.floor(s.screenX - s.spriteScreenWidth / 2));
     const endX = Math.min(INTERNAL_WIDTH - 1, Math.floor(s.screenX + s.spriteScreenWidth / 2));
     const startY = Math.max(0, s.screenY);
@@ -154,16 +156,20 @@ function drawSprite(ctx, s, time) {
 
     ctx.save();
 
-    // Trail afterimage: set alpha
-    if (s.type === 'trail') {
-        ctx.globalAlpha = Math.max(0.05, s.alpha || 0.2);
-    }
+    // Room lighting: sprites sit in the scene (dimmer in dark rooms)
+    const useLegacy = state?.debug?.useLegacyLighting ?? false;
+    const lighting = getRoomLighting(getRoomId(s.x, s.y), state.time.now, useLegacy);
+    let spriteAlpha = 1;
+    if (lighting) spriteAlpha = lighting.ambient * lighting.breathingFactor;
+    if (s.type === 'trail') spriteAlpha *= Math.max(0.05, s.alpha || 0.2);
+    ctx.globalAlpha = spriteAlpha;
 
     // Clip to visible columns (simple approach: draw full sprite, rely on z-buffer check above)
     // For proper per-column clipping, we'd need to draw strip by strip.
     // Simplified: if the center column is visible, draw the whole thing.
     // This is acceptable for < 30 entities.
 
+    const time = state.time;
     switch (s.type) {
         case 'entity':
             drawEntity(ctx, s, time);

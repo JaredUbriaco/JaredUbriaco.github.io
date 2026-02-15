@@ -36,12 +36,14 @@ export function isKeyDown(code) {
 let interactPressed = false;
 let weaponSlotPressed = 0; // 0 = none, 1/2/3 = slot
 
+let lightingTogglePressed = false;
 window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyE') interactPressed = true;
     if (e.code === 'Digit1') weaponSlotPressed = 1;
     if (e.code === 'Digit2') weaponSlotPressed = 2;
     if (e.code === 'Digit3') weaponSlotPressed = 3;
     if (e.code === 'Digit4') weaponSlotPressed = 4;
+    if (e.code === 'KeyL') lightingTogglePressed = true;
 });
 
 /** Returns true once per E press, then resets. */
@@ -58,6 +60,15 @@ export function consumeWeaponSlot() {
     const slot = weaponSlotPressed;
     weaponSlotPressed = 0;
     return slot;
+}
+
+/** Returns true once per L key press (lighting debug toggle). Consumed on read. */
+export function consumeLightingToggle() {
+    if (lightingTogglePressed) {
+        lightingTogglePressed = false;
+        return true;
+    }
+    return false;
 }
 
 // ── Mouse State ─────────────────────────────────────────────────────
