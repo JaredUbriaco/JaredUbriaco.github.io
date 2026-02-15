@@ -85,7 +85,7 @@ const BACKUP_DURATION = 0.55;             // seconds to back up + wiggle when st
 const BACKUP_DURATION_EXTRA = 1.0;        // after many replans, back up longer to escape bad spots
 const REPLAN_COUNT_FOR_EXTRA_BACKUP = 3;
 const NULL_PATH_STUCK_THRESHOLD = 0.8;    // if path is null for this long (nav goal), treat as stuck
-const INTERACT_NULL_PATH_SAFE_DIST = 6;   // within this many tiles of door/button, never replan for null path (just walk there)
+const INTERACT_NULL_PATH_SAFE_DIST = 8;   // within this many tiles of door/button, never replan for null path (approach from other room)
 const DOOR_STUCK_TIME = 6;               // at door in range AND facing, this long without opening → backup and re-approach
 const STUCK_APPROACHING_INTERACT = 3;    // approaching door/button but not in range and no progress this long → backup (escape corner)
 const NEAR_TARGET_NO_REPLAN_DIST = 2;    // within this many tiles of steer target: don't trigger stuck/replan
@@ -174,18 +174,21 @@ function isWalkable(tx, ty) {
     return !isSolid(tx, ty);
 }
 
-/** Tile we should stand on to interact with (gx, gy) from (px, py). Prefers tile toward player; if that tile is solid (narrow corridor), returns first walkable of the 4 cardinals so BFS never targets a wall. */
-function getApproachTile(gx, gy, px, py) {
+/** Tile on the track to interact with (gx, gy): the one adjacent walkable tile that is most central (most open). Deterministic — no "toward player", so the track is certain. */
+function getCentralApproachTile(gx, gy) {
     const tx = Math.floor(gx);
     const ty = Math.floor(gy);
     if (!isSolid(gx, gy)) return { x: tx, y: ty };
-    const preferred = { x: tx + Math.sign(px - gx), y: ty + Math.sign(py - gy) };
-    if (isWalkable(preferred.x, preferred.y)) return preferred;
     const cardinals = [{ x: tx - 1, y: ty }, { x: tx + 1, y: ty }, { x: tx, y: ty - 1 }, { x: tx, y: ty + 1 }];
-    for (const c of cardinals) {
-        if (isWalkable(c.x, c.y)) return c;
-    }
-    return preferred;
+    const walkable = cardinals.filter((c) => isWalkable(c.x, c.y));
+    if (walkable.length === 0) return { x: tx - 1, y: ty };
+    walkable.sort((a, b) => countWalkableNeighbors(b.x, b.y) - countWalkableNeighbors(a.x, a.y));
+    return walkable[0];
+}
+
+/** For non-door interact (e.g. button) when we need a tile; use central so track is consistent. */
+function getApproachTile(gx, gy, px, py) {
+    return getCentralApproachTile(gx, gy);
 }
 
 /** Number of walkable 4-neighbors (centrality: higher = more in open space). Used so BFS prefers walking down the middle. */
@@ -272,7 +275,7 @@ function invalidatePathCache() {
     pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: -1 };
 }
 
-/** Path from player to goal; uses approach tile for doors/interact. Caches by (sx,sy,ex,ey,stepIndex) so we never reuse a path from a different scripted step. */
+/** Path from player to goal. Track = waypoints + path. One approach tile per door (the central one). No "trying" — certain. */
 function getPathToGoal(state, goal) {
     const stepIndex = state.ai._effectiveStepIndex ?? getEffectiveCurrentStepIndex(state);
     const px = state.player.x;
@@ -282,10 +285,10 @@ function getPathToGoal(state, goal) {
     const sy = Math.floor(py);
     let ex, ey;
     if (goal.type === 'door' && goal.door) {
-        const a = getApproachTile(goal.door.cx, goal.door.cy, px, py);
+        const a = getCentralApproachTile(goal.door.cx, goal.door.cy);
         ex = a.x; ey = a.y;
     } else if (goal.action === 'interact') {
-        const a = getApproachTile(goal.x, goal.y, px, py);
+        const a = getCentralApproachTile(goal.x, goal.y);
         ex = a.x; ey = a.y;
     } else {
         ex = Math.floor(goal.x); ey = Math.floor(goal.y);
@@ -297,16 +300,16 @@ function getPathToGoal(state, goal) {
         && (elapsed - pathCache.time) < PATH_CACHE_TTL;
     if (cacheHit) return pathCache.path;
 
-    let path = bfsPath(sx, sy, ex, ey);
+    const path = bfsPath(sx, sy, ex, ey);
     if (path) {
-        path = smoothPath(path);
-        pathCache = { path, sx, sy, ex, ey, stepIndex, time: elapsed };
+        const smoothed = smoothPath(path);
+        pathCache = { path: smoothed, sx, sy, ex, ey, stepIndex, time: elapsed };
         state.ai._pathWasNull = false;
-    } else {
-        pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: elapsed };
-        state.ai._pathWasNull = true;
+        return smoothed;
     }
-    return path;
+    pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: elapsed };
+    state.ai._pathWasNull = true;
+    return null;
 }
 
 // ── Line of sight ────────────────────────────────────────────────────
