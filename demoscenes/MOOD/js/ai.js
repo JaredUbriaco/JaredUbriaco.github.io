@@ -73,6 +73,7 @@ const AIM_DEAD_ZONE = AI_TUNING.aimDeadZone;
 const NO_OVERSHOOT_FRAC = AI_TUNING.noOvershootFrac;
 const PATH_REACH_DIST = AI_TUNING.pathReachDist;
 const LOOK_AHEAD_TILES = 7; // When we have clear LOS, steer toward a point this far along the path (human-like: run toward goal until in range)
+const PATH_CENTROID_WINDOW = 5; // Steer at centroid of this many path nodes so bot walks down the middle, not along the wall
 const COMBAT_RECENT_ENEMY_GRACE = 1.2; // Keep targeting enemy for this long without LOS so we don't rescans
 const COMBAT_SWITCH_CLOSER_TILES = 2;  // Only switch to a different visible enemy if they're this many tiles closer
 
@@ -184,7 +185,17 @@ function getApproachTile(gx, gy, px, py) {
     return preferred;
 }
 
-/** BFS from (sx,sy) to (ex,ey). Returns path [start, ..., end] or null. */
+/** Number of walkable 4-neighbors (centrality: higher = more in open space). Used so BFS prefers walking down the middle. */
+function countWalkableNeighbors(tx, ty) {
+    let n = 0;
+    if (isWalkable(tx + 1, ty)) n++;
+    if (isWalkable(tx - 1, ty)) n++;
+    if (isWalkable(tx, ty + 1)) n++;
+    if (isWalkable(tx, ty - 1)) n++;
+    return n;
+}
+
+/** BFS from (sx,sy) to (ex,ey). Returns path [start, ..., end] or null. Tie-break: prefer tiles with more walkable neighbors so path runs down the center of corridors. */
 function bfsPath(sx, sy, ex, ey) {
     if (!isWalkable(sx, sy) || !isWalkable(ex, ey)) return null;
     if (sx === ex && sy === ey) return [{ x: sx, y: sy }];
@@ -192,6 +203,11 @@ function bfsPath(sx, sy, ex, ey) {
     const queue = [{ x: sx, y: sy }];
     const cameFrom = new Map();
     cameFrom.set(`${sx},${sy}`, null);
+
+    const dirs = [
+        { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+        { x: 1, y: 1 }, { x: -1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: -1 },
+    ];
 
     while (queue.length > 0) {
         const cur = queue.shift();
@@ -204,10 +220,7 @@ function bfsPath(sx, sy, ex, ey) {
             }
             return path;
         }
-        const dirs = [
-            { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
-            { x: 1, y: 1 }, { x: -1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: -1 },
-        ];
+        const neighbors = [];
         for (const d of dirs) {
             const nx = cur.x + d.x, ny = cur.y + d.y;
             if (d.x !== 0 && d.y !== 0) {
@@ -215,8 +228,13 @@ function bfsPath(sx, sy, ex, ey) {
             }
             const key = `${nx},${ny}`;
             if (cameFrom.has(key) || !isWalkable(nx, ny)) continue;
-            cameFrom.set(key, cur);
-            queue.push({ x: nx, y: ny });
+            neighbors.push({ x: nx, y: ny });
+        }
+        // Push most central first so the discovered path tends to run down the middle
+        neighbors.sort((a, b) => countWalkableNeighbors(b.x, b.y) - countWalkableNeighbors(a.x, a.y));
+        for (const cell of neighbors) {
+            cameFrom.set(`${cell.x},${cell.y}`, cur);
+            queue.push(cell);
         }
     }
     return null;
@@ -472,7 +490,20 @@ const INTERACT_STEER_LOCK_DIST = 5;
 /** When this close to an interact point, never trigger "no progress" replan — we're committed to walking there. */
 const COMMIT_TO_INTERACT_DIST = 5;
 
-/** Pick (tx, ty) to steer toward. Uses look-ahead: when we have LOS, target a point up to LOOK_AHEAD_TILES ahead (human-like straight run until in range). */
+/** Centroid of path nodes from idx to idx+window (tile centers). Puts steer target in the middle of the corridor. */
+function pathSegmentCentroid(path, idx, window) {
+    const end = Math.min(idx + window, path.length);
+    let sx = 0, sy = 0, n = 0;
+    for (let i = idx; i < end; i++) {
+        sx += path[i].x + 0.5;
+        sy += path[i].y + 0.5;
+        n++;
+    }
+    if (n === 0) return null;
+    return { x: sx / n, y: sy / n };
+}
+
+/** Pick (tx, ty) to steer toward. Uses look-ahead when we have LOS; target is centroid of next PATH_CENTROID_WINDOW nodes so bot walks down the middle. */
 function getSteerTarget(state, goal) {
     const p = state.player;
     if (goal.type === 'enemy' || goal.action === 'fire') {
@@ -499,8 +530,8 @@ function getSteerTarget(state, goal) {
                 else break;
             }
         }
-        const n = path[bestIdx];
-        return { x: n.x + 0.5, y: n.y + 0.5 };
+        const centroid = pathSegmentCentroid(path, bestIdx, PATH_CENTROID_WINDOW);
+        return centroid || { x: path[bestIdx].x + 0.5, y: path[bestIdx].y + 0.5 };
     };
     if (isInteractGoal(goal)) {
         const approachCenter = getInteractApproachCenter(goal, p.x, p.y);
