@@ -567,11 +567,12 @@ function steerToward(state, goal) {
         const madeProgressTowardInteract = isInteract && (lastInteractDist != null && distToInteract < lastInteractDist - STUCK_PROGRESS_MIN);
         if (isInteract) ai._lastInteractDist = distToInteract; else ai._lastInteractDist = undefined;
 
-        // When committed to an interact goal (within COMMIT_TO_INTERACT_DIST), never replan for "no progress" — just walk there.
+        // For interact goals (button, door, pickup): never replan for "no progress" — steer target jitter causes false positives.
+        // Only replan on null path or door-stuck (at door 3s without opening). Bot walks to goal; null-path handles real blocks.
         const committedToInteract = isInteract && distToInteract <= COMMIT_TO_INTERACT_DIST;
         if (committedToInteract) ai._stuckNoProgressTime = 0;
-        if (lastDist != null && !atWaypoint && !committedToInteract) {
-            const madeProgress = distToTarget < lastDist - STUCK_PROGRESS_MIN || (isInteract && madeProgressTowardInteract);
+        if (!isInteract && lastDist != null && !atWaypoint) {
+            const madeProgress = distToTarget < lastDist - STUCK_PROGRESS_MIN;
             if (!madeProgress) {
                 ai._stuckNoProgressTime = (ai._stuckNoProgressTime || 0) + dt;
                 if (ai._stuckNoProgressTime >= STUCK_NO_PROGRESS_THRESHOLD) {
@@ -586,6 +587,8 @@ function steerToward(state, goal) {
             } else {
                 ai._stuckNoProgressTime = 0;
             }
+        } else if (isInteract) {
+            ai._stuckNoProgressTime = 0;
         }
         ai._lastSteerTargetDist = distToTarget;
     } else {
