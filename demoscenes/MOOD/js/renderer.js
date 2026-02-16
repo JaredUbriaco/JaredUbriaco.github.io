@@ -264,6 +264,96 @@ function drawBossArenaFloor(ctx, state) {
     ctx.restore();
 }
 
+// ── Debug Path Rendering ────────────────────────────────────────────
+function drawDebugPath(ctx, state) {
+    // Only draw if AI is active and debug is enabled (or just always for now if requested)
+    const path = state.ai.telemetry?.pathNodes;
+    if (path && path.length > 0) {
+        ctx.save();
+
+        // Mini-Map overlay in the top-right.
+        const mapSize = 150;
+        const mapX = INTERNAL_WIDTH - mapSize - 10;
+        const mapY = 10;
+        const scale = 4; // 1 tile = 4 pixels
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(mapX, mapY, mapSize, mapSize);
+
+        // Clip to map
+        ctx.beginPath();
+        ctx.rect(mapX, mapY, mapSize, mapSize);
+        ctx.clip();
+
+        // Center map on player
+        const cx = mapX + mapSize / 2;
+        const cy = mapY + mapSize / 2;
+        const px = state.player.x;
+        const py = state.player.y;
+
+        ctx.translate(cx, cy);
+        ctx.scale(scale, scale);
+        ctx.translate(-px, -py);
+
+        // Draw Track (if available in state)
+        if (state.ai.debugTrack) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            state.ai.debugTrack.forEach((p, i) => {
+                if (i === 0) ctx.moveTo(p.x, p.y);
+                else ctx.lineTo(p.x, p.y);
+            });
+            ctx.stroke();
+            // Nodes
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            state.ai.debugTrack.forEach(p => {
+                ctx.fillRect(p.x - 0.25, p.y - 0.25, 0.5, 0.5);
+            });
+        }
+
+        // Draw Path (GREEN)
+        ctx.strokeStyle = '#0f0';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        path.forEach((p, i) => {
+            if (i === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+        });
+        ctx.stroke();
+
+        // Draw Bot Target (RED X)
+        if (state.ai.telemetry.targetPos) {
+            const tx = state.ai.telemetry.targetPos.x;
+            const ty = state.ai.telemetry.targetPos.y;
+            ctx.strokeStyle = '#f00';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(tx - 1, ty - 1); ctx.lineTo(tx + 1, ty + 1);
+            ctx.moveTo(tx + 1, ty - 1); ctx.lineTo(tx - 1, ty + 1);
+            ctx.stroke();
+        }
+
+        // Draw Player/Bot (Yellow dot)
+        ctx.fillStyle = '#ff0';
+        ctx.beginPath();
+        ctx.arc(px, py, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw Enemies (Red dots)
+        ctx.fillStyle = '#f00';
+        state.entities.forEach(e => {
+            if (e.hp > 0) {
+                ctx.beginPath();
+                ctx.arc(e.x, e.y, 0.3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+
+        ctx.restore();
+    }
+}
+
 // ── Main Draw Function ──────────────────────────────────────────────
 
 /**
@@ -301,6 +391,9 @@ export function draw(state, ctx) {
 
     // ── 5. HUD Drawing (canvas elements) ────────────────────────
     drawHud(ctx, state);
+
+    // ── 5.5 Debug Overlay (Minimap) ─────────────────────────────
+    drawDebugPath(ctx, state);
 
     // ── 6. Post-Effects ─────────────────────────────────────────
     // Distortion overlay

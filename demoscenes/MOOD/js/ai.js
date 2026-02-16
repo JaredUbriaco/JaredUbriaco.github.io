@@ -1,779 +1,687 @@
 /**
- * ai.js — Goal-driven AI (1990s-style)
- *
- * Idle ~5s → AI takes over. Like Doom/Quake-era bots: pick one goal,
- * BFS pathfind on the tile grid (go around walls/pillars), steer toward
- * the next path step, interact when in range. One loop: goal → path → steer → act.
- *
- * Engine contract (goal validity, steer target, BFS, stuck recovery) is defined
- * once for all levels in levels/BFS-AND-STEERING.md. No step-specific logic.
- *
- * The AI uses the same world state the minimap displays: grid, entities, doors,
- * rooms (getRoomId). There is no separate minimap feed — decisions use that data directly.
- *
- * AI_TUNING = general rules (how to walk, aim, combat). Level data (steps, roomOrder) =
- * the "map and instructions" for the level; level can override via custom doneWhen etc.
- *
- * Combat: enemy in LOS → goal = enemy. We turn toward them and may advance until
- * within combatNoAdvanceDist; then we STOP moving and only turn + fire (avoids
- * point-blank "dance"). Fire when aim within combatFacingTolerance; if enemy
- * within combatPointBlankDist we use slightly looser combatFacingToleranceClose
- * so shots land while they move.
+ * ai.js — Bot Artificial Intelligence
+ * 
+ * New Context-Based Steering Implementation (Phase 3 "From Scratch").
+ * 
+ * Logic Flow:
+ * 1. High-Level Strategy (update()):
+ *    - Priority 1: Clear enemies in current room.
+ *    - Priority 2: Follow Scripted Route (Areas/Rooms/Buttons).
+ * 
+ * 2. Navigation (getPathToGoal()):
+ *    - Uses A* to find path to current goal.
+ *    - Uses Catmull-Rom splines to smooth path for "Flow".
+ * 
+ * 3. Movement (steerToward()):
+ *    - Calculates weighted vectors:
+ *      * Flow: Direction along the path.
+ *      * Avoidance: Raycast "whiskers" pushing away from walls.
+ *      * Combat: Maintain optimal weapon range.
+ *    - Blends vectors for organic, fluid movement.
  */
 
-import * as map from './map.js';
 import {
-    isSolid, getRoomId, doors, gates, getMapWidth, getMapHeight,
+    isSolid, getRoomId, doors, gates, getMapWidth, getMapHeight, BOSS_LIGHTWELLS
 } from './map.js';
-import { TILE, INTERACTION_RANGE, INTERACTION_ANGLE, PLAYER_RADIUS, MOUSE_SENSITIVITY } from './config.js';
-import { angleTo, distanceTo, normalizeAngle } from './utils.js';
+import { TILE, INTERACTION_RANGE, INTERACTION_ANGLE, PLAYER_RADIUS, MOUSE_SENSITIVITY, WEAPONS } from './config.js';
+import { angleTo, distanceTo, normalizeAngle, catmullRom, manhattanDistance } from './utils.js';
 import {
     buildRoute, getCurrentScriptedStepIndex as getRouteStepIndex,
-    stepToGoal as routeStepToGoal, isRoomClear, getExploreFallbackRoom,
-} from './ai-route.js';
-import { moodLevel1, createMoodLevel1WorldApi } from './levels/mood-level1.js';
+    getScriptedRoute, getEffectiveCurrentStepIndex,
+    isInteractGoal, getInteractApproachCenter,
+    getCurrentGoal, getMainTrack
+} from './ai_script.js';
 
-const worldApi = createMoodLevel1WorldApi(map);
+// ── Tuning Constants ────────────────────────────────────────────────
 
-// ── Tuning ──────────────────────────────────────────────────────────
-// lookDxMax: AI outputs lookDX; player does angle += lookDX * MOUSE_SENSITIVITY (0.002).
-//   Clamp to ±lookDxMax so turn rate ≈ lookDxMax*0.002 rad/frame (e.g. 28 → ~3 rad/s at 60fps).
-// combatFacingTolerance: handgun is hitscan (single ray) — only fire when aimed within this (rad).
-// combatNoAdvanceDist: when enemy is this close (tiles), do NOT move forward — only turn and fire.
-// combatPointBlankDist: when enemy within this (tiles), use combatFacingToleranceClose for fire check.
-// aimDeadZone: if |angleDiff| < this (rad), don't turn — stops left-right oscillation when nearly aligned.
-// noOvershootFrac: cap turn so we never rotate more than this fraction of angleDiff per frame (stops overshoot jitter).
-// combatBackUpDist: when enemy closer than this (tiles), back up instead of strafe (create separation).
-export const AI_TUNING = {
-    combatMaxRange: 12,
-    combatNoAdvanceDist: 2,   // stop advancing only when close; follow and close in before standoff
-    combatBackUpDist: 1.5,
-    combatPointBlankDist: 2,
-    turnGain: 10,
-    lookDxMax: 28,
-    aimDeadZone: 0.02,
-    noOvershootFrac: 0.9,
-    facingTolerance: 0.2,
-    combatFacingTolerance: 0.065,      // slightly looser so we fire sooner, less aim jitter
-    combatFacingToleranceClose: 0.12,  // point-blank: fire more readily when very close
-    interactFacingTolerance: INTERACTION_ANGLE,
-    pathReachDist: 0.4,
+// Navigation
+const PATH_REACH_DIST = 1.2;          // Distance to consider a path node "reached" (increased for flow)
+const LOOK_AHEAD_TILES = 4;           // How far along path to look for Flow Vector
+const LOOK_AHEAD_TILES_NAV = 2;       // Shorter lookahead for precision nav
+const STUCK_TIME_THRESHOLD = 2.0;     // Seconds with no progress before replan
+const DOOR_STUCK_TIME = 2.5;          // Seconds waiting at door before backup
+const NULL_PATH_STUCK_THRESHOLD = 3.0;// Seconds with no path before backup
+const BACKUP_DURATION = 1.0;
+const BACKUP_DURATION_EXTRA = 2.5;
+const REPLAN_COUNT_FOR_EXTRA_BACKUP = 2;
+const DOOR_FALLBACK_AFTER_ATTEMPTS = 3;
+
+// Combat
+const TURN_GAIN = 0.15;               // How snappy the turning is
+const LOOK_DX_MAX = 100.0;             // Max turn speed per frame
+const NO_OVERSHOOT_FRAC = 0.6;        // Damping to prevent jitter
+const AIM_DEAD_ZONE = 0.05;           // Radians
+const COMBAT_FACING_TOLERANCE = 0.35; // ~20 deg
+const COMBAT_FACING_TOLERANCE_CLOSE = 0.6;
+const COMBAT_MAX_RANGE = 25.0;
+const COMBAT_NO_ADVANCE_DIST = 5.0;   // Default stop distance
+const COMBAT_BACK_UP_DIST = 3.0;      // Default back up distance
+const COMBAT_POINT_BLANK_DIST = 2.5;
+
+const AI_TUNING = {
+    interactFacingTolerance: 0.5,
 };
 
-const COMBAT_MAX_RANGE = AI_TUNING.combatMaxRange;
-const COMBAT_NO_ADVANCE_DIST = AI_TUNING.combatNoAdvanceDist;
-const COMBAT_BACK_UP_DIST = AI_TUNING.combatBackUpDist;
-const TURN_GAIN = AI_TUNING.turnGain;
-const LOOK_DX_MAX = AI_TUNING.lookDxMax;
-const FACING_TOLERANCE = AI_TUNING.facingTolerance;
-const COMBAT_FACING_TOLERANCE = AI_TUNING.combatFacingTolerance;
-const COMBAT_FACING_TOLERANCE_CLOSE = AI_TUNING.combatFacingToleranceClose;
-const COMBAT_POINT_BLANK_DIST = AI_TUNING.combatPointBlankDist;
-const AIM_DEAD_ZONE = AI_TUNING.aimDeadZone;
-const NO_OVERSHOOT_FRAC = AI_TUNING.noOvershootFrac;
-const PATH_REACH_DIST = AI_TUNING.pathReachDist;
-const LOOK_AHEAD_TILES = 7; // Interact goals: steer toward point this far along path when we have LOS
-const LOOK_AHEAD_TILES_NAV = 3; // Waypoint/enter_room: short look-ahead so we follow path step-by-step and don't aim through walls/doors
-const PATH_CENTROID_WINDOW = 5; // Steer at centroid of this many path nodes so bot walks down the middle, not along the wall
-const COMBAT_RECENT_ENEMY_GRACE = 1.2; // Keep targeting enemy for this long without LOS so we don't rescans
-const COMBAT_SWITCH_CLOSER_TILES = 2;  // Only switch to a different visible enemy if they're this many tiles closer
+// ── State & Cache ───────────────────────────────────────────────────
 
-// Stuck recovery: when we don't make progress toward steer target for this long, back up and replan
-const STUCK_NO_PROGRESS_THRESHOLD = 1.0;  // seconds (slightly sooner so we escape corners faster)
-const STUCK_PROGRESS_MIN = 0.2;           // tiles improvement per check to count as progress
-const BACKUP_DURATION = 0.55;             // seconds to back up + wiggle when stuck
-const BACKUP_DURATION_EXTRA = 1.0;        // after many replans, back up longer to escape bad spots
-const REPLAN_COUNT_FOR_EXTRA_BACKUP = 3;
-const NULL_PATH_STUCK_THRESHOLD = 0.8;    // if path is null for this long (nav goal), treat as stuck
-const INTERACT_NULL_PATH_SAFE_DIST = 8;   // within this many tiles of door/button, never replan for null path (approach from other room)
-const DOOR_STUCK_TIME = 6;               // at door in range AND facing, this long without opening → backup and re-approach
-const STUCK_APPROACHING_INTERACT = 3;    // approaching door/button but not in range and no progress this long → backup (escape corner)
-const NEAR_TARGET_NO_REPLAN_DIST = 2;    // within this many tiles of steer target: don't trigger stuck/replan
-const NEAR_DOOR_NO_STUCK_APPROACHING = 4; // within this many tiles of door/button: never "stuck approaching" (just walk there)
-const DOOR_FALLBACK_AFTER_ATTEMPTS = 5;   // after this many door backup cycles, log FAILURE/FALLBACK
-
-// ── List of goals (scripted route from ai-route framework + level data) ─
-// Order: spawn → handgun → first door → next room → kill enemies → button → door → next room → …
-// Branching: clear room, then choose next door; repeat. Same logic for any level.
-//
-// Universal rule: a door or gate that can no longer be interacted with (already open) is NEVER
-// a valid goal. We skip such steps when choosing the current goal so the AI never goes back
-// to an open door or spins there.
-
-let SCRIPTED_ROUTE = null;
-function getScriptedRoute() {
-    if (!SCRIPTED_ROUTE) SCRIPTED_ROUTE = buildRoute(moodLevel1, worldApi);
-    return SCRIPTED_ROUTE;
-}
-
-/** Raw index of first step where doneWhen(state) is false. */
-function getCurrentScriptedStepIndex(state) {
-    return getRouteStepIndex(getScriptedRoute(), state);
-}
-
-/**
- * Effective current step: first step that is not done AND (if it's a door step) the door
- * is still interactable (not open). Ensures we never target an open door/gate.
- * Optionally fills state.ai._debugStepSkip with why we skipped each step (for debugging).
- */
-function getEffectiveCurrentStepIndex(state) {
-    const route = getScriptedRoute();
-    const skipReasons = [];
-    for (let i = 0; i < route.length; i++) {
-        const step = route[i];
-        if (step.doneWhen(state)) {
-            skipReasons.push(`${i}:${step.label}(done)`);
-            continue;
-        }
-        if (step.doorKey && !doors[step.doorKey]) {
-            // Fallback: resolve door by step position (handles wrong/mismatched doorKey in level data)
-            const sx = step.x != null ? step.x : (step.position && step.position.x);
-            const sy = step.y != null ? step.y : (step.position && step.position.y);
-            if (sx != null && sy != null) {
-                for (const g of gates) {
-                    for (const t of g.tiles) {
-                        const cx = t.x + 0.5, cy = t.y + 0.5;
-                        if (Math.abs(cx - sx) <= 2.5 && Math.abs(cy - sy) <= 2.5) {
-                            step.doorKey = `${t.x},${t.y}`;
-                            break;
-                        }
-                    }
-                    if (doors[step.doorKey]) break;
-                }
-            }
-            if (!doors[step.doorKey]) {
-                skipReasons.push(`${i}:${step.label}(door missing)`);
-                if (!state.ai._warnedMissingDoor) {
-                    state.ai._warnedMissingDoor = new Set();
-                }
-                if (!state.ai._warnedMissingDoor.has(step.doorKey)) {
-                    console.warn('[AI] Step "' + (step.label || i) + '" has doorKey "' + step.doorKey + '" but door not in world; skipping step.');
-                    state.ai._warnedMissingDoor.add(step.doorKey);
-                }
-                continue;
-            }
-        }
-        if (step.doorKey && doors[step.doorKey].openProgress >= 1) {
-            skipReasons.push(`${i}:${step.label}(door open)`);
-            continue;
-        }
-        state.ai._debugStepSkip = skipReasons;
-        return i;
-    }
-    state.ai._debugStepSkip = skipReasons;
-    return -1;
-}
-
-function stepToGoal(step) {
-    return routeStepToGoal(step, worldApi);
-}
-
-// ── Tile pathfinding (BFS) ───────────────────────────────────────────
-function isWalkable(tx, ty) {
-    if (tx < 0 || tx >= getMapWidth() || ty < 0 || ty >= getMapHeight()) return false;
-    return !isSolid(tx, ty);
-}
-
-/** Tile on the track to interact with (gx, gy): the one adjacent walkable tile that is most central (most open). Deterministic — no "toward player", so the track is certain. */
-function getCentralApproachTile(gx, gy) {
-    const tx = Math.floor(gx);
-    const ty = Math.floor(gy);
-    if (!isSolid(gx, gy)) return { x: tx, y: ty };
-    const cardinals = [{ x: tx - 1, y: ty }, { x: tx + 1, y: ty }, { x: tx, y: ty - 1 }, { x: tx, y: ty + 1 }];
-    const walkable = cardinals.filter((c) => isWalkable(c.x, c.y));
-    if (walkable.length === 0) return { x: tx - 1, y: ty };
-    walkable.sort((a, b) => countWalkableNeighbors(b.x, b.y) - countWalkableNeighbors(a.x, a.y));
-    return walkable[0];
-}
-
-/** For non-door interact (e.g. button) when we need a tile; use central so track is consistent. */
-function getApproachTile(gx, gy, px, py) {
-    return getCentralApproachTile(gx, gy);
-}
-
-/** Number of walkable 4-neighbors (centrality: higher = more in open space). Used so BFS prefers walking down the middle. */
-function countWalkableNeighbors(tx, ty) {
-    let n = 0;
-    if (isWalkable(tx + 1, ty)) n++;
-    if (isWalkable(tx - 1, ty)) n++;
-    if (isWalkable(tx, ty + 1)) n++;
-    if (isWalkable(tx, ty - 1)) n++;
-    return n;
-}
-
-/** BFS from (sx,sy) to (ex,ey). Returns path [start, ..., end] or null. Tie-break: prefer tiles with more walkable neighbors so path runs down the center of corridors. */
-function bfsPath(sx, sy, ex, ey) {
-    if (!isWalkable(sx, sy) || !isWalkable(ex, ey)) return null;
-    if (sx === ex && sy === ey) return [{ x: sx, y: sy }];
-
-    const queue = [{ x: sx, y: sy }];
-    const cameFrom = new Map();
-    cameFrom.set(`${sx},${sy}`, null);
-
-    const dirs = [
-        { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
-        { x: 1, y: 1 }, { x: -1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: -1 },
-    ];
-
-    while (queue.length > 0) {
-        const cur = queue.shift();
-        if (cur.x === ex && cur.y === ey) {
-            const path = [];
-            let p = cur;
-            while (p) {
-                path.unshift(p);
-                p = cameFrom.get(`${p.x},${p.y}`);
-            }
-            return path;
-        }
-        const neighbors = [];
-        for (const d of dirs) {
-            const nx = cur.x + d.x, ny = cur.y + d.y;
-            if (d.x !== 0 && d.y !== 0) {
-                if (!isWalkable(cur.x + d.x, cur.y) || !isWalkable(cur.x, cur.y + d.y)) continue;
-            }
-            const key = `${nx},${ny}`;
-            if (cameFrom.has(key) || !isWalkable(nx, ny)) continue;
-            neighbors.push({ x: nx, y: ny });
-        }
-        // Push most central first so the discovered path tends to run down the middle
-        neighbors.sort((a, b) => countWalkableNeighbors(b.x, b.y) - countWalkableNeighbors(a.x, a.y));
-        for (const cell of neighbors) {
-            cameFrom.set(`${cell.x},${cell.y}`, cur);
-            queue.push(cell);
-        }
-    }
-    return null;
-}
-
-/** Smooth path by string-pulling: keep only nodes we have LOS through (cut corners). Fewer waypoints = smoother ground path.
- * Known limitation: LOS is a thin ray; we do not account for player radius. A cut corner can occasionally be too tight;
- * stuck detection will backup and replan if the bot gets stuck. See BFS-AND-STEERING.md. */
-function smoothPath(path) {
-    if (!path || path.length <= 2) return path;
-    const out = [path[0]];
-    let i = 0;
-    while (i < path.length - 1) {
-        const ax = path[i].x + 0.5, ay = path[i].y + 0.5;
-        let best = i + 1;
-        for (let j = i + 2; j < path.length; j++) {
-            const bx = path[j].x + 0.5, by = path[j].y + 0.5;
-            if (hasLineOfSight(ax, ay, bx, by)) best = j;
-        }
-        out.push(path[best]);
-        i = best;
-    }
-    return out;
-}
-
-// Path cache: shorter TTL = recalc path more often (more responsive to blocks); longer = fewer recalc. Stuck recovery invalidates cache so we get a fresh path after backup.
-const PATH_CACHE_TTL = 0.5;
-let pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: -1 };
-let lastCachedStepIndex = -2;
+let pathCache = null;         // { path: [], sx, sy, ex, ey, stepIndex, time: number }
+let lastCachedStepIndex = -2; // dirty check for step changes
 
 function invalidatePathCache() {
-    pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: -1 };
+    pathCache = null;
 }
 
-/** Path from player to goal. Two kinds of track:
- * - Objective track: doors, buttons, waypoints — path to approach tile or step position (central, certain).
- * - Combat track: when killing enemy in a room with roomTracks, path to a track waypoint (closest to enemy, reachable), not to enemy position — keeps movement central, off corners.
- */
-function getPathToGoal(state, goal) {
-    const stepIndex = state.ai._effectiveStepIndex ?? getEffectiveCurrentStepIndex(state);
-    const px = state.player.x;
-    const py = state.player.y;
-    const elapsed = state.time.elapsed || 0;
-    const sx = Math.floor(px);
-    const sy = Math.floor(py);
-    let ex, ey;
-    if (goal.type === 'door' && goal.door) {
-        const a = getCentralApproachTile(goal.door.cx, goal.door.cy);
-        ex = a.x; ey = a.y;
-    } else if (goal.action === 'interact') {
-        const a = getCentralApproachTile(goal.x, goal.y);
-        ex = a.x; ey = a.y;
-    } else {
-        ex = Math.floor(goal.x);
-        ey = Math.floor(goal.y);
-    }
-    let pathPrecomputed = null;
-    if ((goal.type === 'enemy' || goal.action === 'fire') && goal.entity && worldApi.getRoomTrack) {
-        const roomId = goal.entity.roomId;
-        const track = roomId ? worldApi.getRoomTrack(roomId) : null;
-        if (track && track.length > 0) {
-            const ex_ = goal.entity.x;
-            const ey_ = goal.entity.y;
-            const sorted = [...track].filter((p) => isWalkable(p.x, p.y)).sort(
-                (a, b) => distanceTo(a.x + 0.5, a.y + 0.5, ex_, ey_) - distanceTo(b.x + 0.5, b.y + 0.5, ex_, ey_)
-            );
-            for (const pt of sorted) {
-                const pth = bfsPath(sx, sy, pt.x, pt.y);
-                if (pth) {
-                    ex = pt.x;
-                    ey = pt.y;
-                    pathPrecomputed = pth;
-                    break;
-                }
+// ── Pathfinding (A* + Splines) ──────────────────────────────────────
+
+/** A* Pathfinding: Finds grid path from (sx, sy) to (ex, ey). */
+function bfsPath(sx, sy, ex, ey) {
+    if (sx === ex && sy === ey) return [{ x: sx, y: sy }];
+
+    // Check line of sight first for trivial paths? No, A* is fast enough.
+    // If start or end is solid, we might have issues, but A* handles it (returns null).
+
+    const startNode = { x: sx, y: sy, g: 0, h: 0, f: 0, parent: null };
+    const openList = [startNode];
+    const closedSet = new Set();
+    const cameFrom = new Map(); // "x,y" => node
+
+    const getKey = (x, y) => `${x},${y}`;
+    const openMap = new Map(); // Quick lookup
+    openMap.set(getKey(sx, sy), startNode);
+
+    // Limits
+    const MAX_NODES = 500;
+    let nodesExplored = 0;
+
+    while (openList.length > 0) {
+        // Sort by F cost (lowest first)
+        openList.sort((a, b) => a.f - b.f);
+        const current = openList.shift();
+        const k = getKey(current.x, current.y);
+        openMap.delete(k);
+        closedSet.add(k);
+
+        if (current.x === ex && current.y === ey) {
+            // Reconstruct path
+            const path = [];
+            let curr = current;
+            while (curr) {
+                path.push({ x: curr.x, y: curr.y });
+                curr = curr.parent;
             }
-            if (pathPrecomputed == null) {
-                ex = Math.floor(goal.x);
-                ey = Math.floor(goal.y);
-            }
-        } else {
-            ex = Math.floor(goal.x);
-            ey = Math.floor(goal.y);
+            return path.reverse();
+        }
+
+        if (++nodesExplored > MAX_NODES) return null; // Too complex
+
+        const neighbors = [
+            { x: current.x + 1, y: current.y },
+            { x: current.x - 1, y: current.y },
+            { x: current.x, y: current.y + 1 },
+            { x: current.x, y: current.y - 1 }
+        ];
+
+        for (const n of neighbors) {
+            if (isSolid(n.x, n.y) && !(n.x === ex && n.y === ey)) continue; // Allow end node to be solid (e.g. invalid map data) but usually we shouldn't.
+            // Actually, we check isSolid in map.js which handles doors.
+
+            const nk = getKey(n.x, n.y);
+            if (closedSet.has(nk)) continue;
+
+            // Centering cost: Penalize tiles next to walls
+            let openness = 0;
+            if (!isSolid(n.x + 1, n.y)) openness++;
+            if (!isSolid(n.x - 1, n.y)) openness++;
+            if (!isSolid(n.x, n.y + 1)) openness++;
+            if (!isSolid(n.x, n.y - 1)) openness++;
+
+            // Cost = 1 (dist) + penalty for being near walls (less open)
+            // If openness < 4 (touches wall), add cost.
+            const centeringCost = (4 - openness) * 2.0;
+
+            const g = current.g + 1 + centeringCost;
+            const h = manhattanDistance(n.x, n.y, ex, ey);
+            const f = g + h;
+
+            const existing = openMap.get(nk);
+            if (existing && g >= existing.g) continue;
+
+            const newNode = { x: n.x, y: n.y, g, h, f, parent: current };
+            openMap.set(nk, newNode);
+            openList.push(newNode);
         }
     }
-
-    const cacheHit = pathCache.path
-        && pathCache.sx === sx && pathCache.sy === sy && pathCache.ex === ex && pathCache.ey === ey
-        && pathCache.stepIndex === stepIndex
-        && (elapsed - pathCache.time) < PATH_CACHE_TTL;
-    if (cacheHit) return pathCache.path;
-
-    const path = pathPrecomputed || bfsPath(sx, sy, ex, ey);
-    if (path) {
-        const smoothed = smoothPath(path);
-        pathCache = { path: smoothed, sx, sy, ex, ey, stepIndex, time: elapsed };
-        state.ai._pathWasNull = false;
-        return smoothed;
-    }
-    pathCache = { path: null, sx: -1, sy: -1, ex: -1, ey: -1, stepIndex: -2, time: elapsed };
-    state.ai._pathWasNull = true;
     return null;
 }
 
-// ── Line of sight ────────────────────────────────────────────────────
-/** True if ray from (x1,y1) to (x2,y2) doesn’t hit solid (step 0.2). */
-function hasLineOfSight(x1, y1, x2, y2) {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < 0.01) return true;
-    const steps = Math.max(2, Math.ceil(dist / 0.2));
-    for (let i = 1; i < steps; i++) {
-        const t = i / steps;
-        const x = x1 + dx * t;
-        const y = y1 + dy * t;
-        if (isSolid(x, y)) return false;
+/** Catmull-Rom Spline Smoothing */
+function smoothPath(path) {
+    if (!path || path.length === 0) return path;
+
+    // If path is short, just center it
+    if (path.length < 3) {
+        return path.map(p => ({ x: p.x + 0.5, y: p.y + 0.5 }));
+    }
+
+    const smoothed = [];
+    // Points for spline: duplicate start/end to control tension at tips
+    const points = [path[0], ...path, path[path.length - 1]].map(p => ({ x: p.x + 0.5, y: p.y + 0.5 }));
+
+    for (let i = 0; i < points.length - 3; i++) {
+        const p0 = points[i];
+        const p1 = points[i + 1];
+        const p2 = points[i + 2];
+        const p3 = points[i + 3];
+
+        // Steps per segment
+        const dist = distanceTo(p1.x, p1.y, p2.x, p2.y);
+        const steps = Math.max(1, Math.floor(dist * 2)); // 2 points per tile
+
+        for (let t = 0; t < 1; t += 1 / steps) {
+            const pt = catmullRom(p0, p1, p2, p3, t);
+            // Collision check: if spline clips wall, fallback to hard node
+            if (!isSolid(pt.x, pt.y)) {
+                smoothed.push(pt);
+            } else {
+                smoothed.push(p1); // Fallback
+            }
+        }
+    }
+    // Add final point
+    smoothed.push(points[points.length - 2]);
+    return smoothed;
+}
+
+function getPathToGoal(state, goal) {
+    const elapsed = state.time.elapsed || 0;
+    const stepIndex = state.ai._effectiveStepIndex ?? -2;
+    const p = state.player;
+
+    const sx = Math.floor(p.x);
+    const sy = Math.floor(p.y);
+    const ex = goal.door ? Math.floor(goal.door.cx) : Math.floor(goal.x);
+    const ey = goal.door ? Math.floor(goal.door.cy) : Math.floor(goal.y);
+
+    // Cache hit?
+    if (pathCache &&
+        stepIndex === pathCache.stepIndex &&
+        pathCache.ex === ex && pathCache.ey === ey &&
+        distanceTo(p.x, p.y, pathCache.sx, pathCache.sy) < 3.0 && // reuse if close to start
+        (elapsed - pathCache.time) < 1.0) { // expire after 1s to allow dynamic updates
+        return pathCache.path;
+    }
+
+    const path = bfsPath(sx, sy, ex, ey);
+    if (path) {
+        // Apply Spline Smoothing for fluid movement
+        const smoothed = smoothPath(path);
+
+        pathCache = { path: smoothed, sx, sy, ex, ey, stepIndex, time: elapsed };
+        state.ai._pathWasNull = false;
+        state.ai.telemetry = state.ai.telemetry || {};
+        state.ai.telemetry.pathNodes = smoothed.length;
+        return smoothed;
+    } else {
+        pathCache = null;
+        state.ai._pathWasNull = true;
+        return null;
+    }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function hasPathClear(x1, y1, x2, y2) {
+    const d = distanceTo(x1, y1, x2, y2);
+    const steps = Math.ceil(d * 2);
+    const dx = (x2 - x1) / steps;
+    const dy = (y2 - y1) / steps;
+    for (let i = 0; i <= steps; i++) {
+        const tx = x1 + dx * i;
+        const ty = y1 + dy * i;
+        if (isSolid(tx, ty)) return false;
     }
     return true;
 }
 
-/** True if moving one small step forward from (x,y,angle) would hit solid. Uses a slightly shorter step so the AI doesn't give up too early at corners; player physics (wall sliding) handles the actual stop and lets us slide along walls. */
-function isPathBlocked(x, y, angle) {
-    const step = PLAYER_RADIUS * 1.4 + 0.05;
-    return isSolid(x + Math.cos(angle) * step, y + Math.sin(angle) * step);
+function hasLineOfSight(x1, y1, x2, y2) {
+    return hasPathClear(x1, y1, x2, y2);
 }
 
-// ── Goal selection ───────────────────────────────────────────────────
-
-/** Nearest live enemy we have LOS to, within COMBAT_MAX_RANGE, or null. */
-function getNearestVisibleEnemy(state) {
-    const p = state.player;
-    const entities = state.entities || [];
-    let nearest = null;
-    let minDist = Infinity;
-    for (const e of entities) {
-        if (e.hp <= 0) continue;
-        const d = distanceTo(p.x, p.y, e.x, e.y);
-        if (d > COMBAT_MAX_RANGE || d >= minDist) continue;
-        if (!hasLineOfSight(p.x, p.y, e.x, e.y)) continue;
-        minDist = d;
-        nearest = e;
-    }
-    return nearest;
-}
-
-/** Nearest live enemy in the given room (by distance). Used to clear room before button/interact. */
-function getNearestEnemyInRoom(state, roomId) {
-    const p = state.player;
-    const entities = state.entities || [];
-    let nearest = null;
-    let minDist = Infinity;
-    for (const e of entities) {
-        if (e.hp <= 0 || e.roomId !== roomId) continue;
-        const d = distanceTo(p.x, p.y, e.x, e.y);
-        if (d >= minDist) continue;
-        minDist = d;
-        nearest = e;
-    }
-    return nearest;
-}
-
-/** If we had a recent enemy target and they're still in range and alive, return them (combat memory so we don't rescans). */
-function getRecentEnemyIfValid(state) {
-    const ai = state.ai;
-    const elapsed = state.time.elapsed || 0;
-    if (ai.lastEnemyTargetId == null || (elapsed - ai.lastEnemyTime) > COMBAT_RECENT_ENEMY_GRACE) return null;
-    const entities = state.entities || [];
-    const p = state.player;
-    for (const e of entities) {
-        if (e.id !== ai.lastEnemyTargetId || e.hp <= 0) continue;
-        const d = distanceTo(p.x, p.y, e.x, e.y);
-        if (d > COMBAT_MAX_RANGE) return null;
-        return e;
-    }
-    return null;
-}
-
-/** Closed door we can open (not locked, or button locked and button pressed). */
-function canOpenDoor(state, door) {
-    if (door.openProgress >= 1) return false;
-    if (!door.locked) return true;
-    if (door.lockType === 'button' && state.flags.buttonPressed) return true;
-    return false;
-}
-
-/** Nearest closed gate we can open, within range, or null. One goal per opening. */
-function getNearestClosedDoor(state, maxRange = 6) {
-    const p = state.player;
-    let best = null;
-    let bestDist = Infinity;
-    for (const gate of gates) {
-        if (!canOpenDoor(state, gate)) continue;
-        const dist = distanceTo(p.x, p.y, gate.cx, gate.cy);
-        if (dist > maxRange || dist >= bestDist) continue;
-        bestDist = dist;
-        best = { door: gate, x: gate.cx, y: gate.cy };
-    }
-    return best;
-}
-
-/** In interaction range and facing (angle) for position (tx, ty). */
-function isInRangeAndFacing(px, py, pAngle, tx, ty, angleTolerance = INTERACTION_ANGLE) {
+function isInRangeAndFacing(px, py, angle, tx, ty, tolerance = 0.5) { // default ~30 deg
     const dist = distanceTo(px, py, tx, ty);
     if (dist > INTERACTION_RANGE) return false;
     const wantAngle = angleTo(px, py, tx, ty);
-    return Math.abs(normalizeAngle(wantAngle - pAngle)) <= angleTolerance;
+    const diff = Math.abs(normalizeAngle(wantAngle - angle));
+    return diff <= tolerance;
 }
 
+function isPathBlocked(x, y, angle, dist = 1.0) {
+    const tx = x + Math.cos(angle) * dist;
+    const ty = y + Math.sin(angle) * dist;
+    return isSolid(tx, ty);
+}
+
+// ── Context-Based Steering (New "From Scratch" System) ────────────────
+
+/** 
+ * 1. Flow Vector: Get desired direction based on Following the Path.
+ * Returns normalized vector {x, y} or {0,0} if no path.
+ */
+function getFlowVector(path, p, lookAhead = 4) {
+    if (!path || path.length < 2) return { x: 0, y: 0 };
+
+    // Find closest point on path (index)
+    let closestIdx = 0;
+    let minDist = Infinity;
+    for (let i = 0; i < path.length; i++) {
+        const d = distanceTo(p.x, p.y, path[i].x, path[i].y);
+        if (d < minDist) {
+            minDist = d;
+            closestIdx = i;
+        }
+    }
+
+    // Look ahead to get flow direction
+    let targetIdx = Math.min(closestIdx + lookAhead, path.length - 1);
+
+    // If we are far from the path, flow towards the closest point first to rejoin
+    if (minDist > 2.0) {
+        targetIdx = closestIdx + 1;
+    }
+
+    const tx = path[targetIdx].x;
+    const ty = path[targetIdx].y;
+    const dx = tx - p.x;
+    const dy = ty - p.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+
+    if (len > 0.001) return { x: dx / len, y: dy / len };
+    return { x: 0, y: 0 };
+}
 
 /**
- * One goal per frame. See AI-BEHAVIOR.md for the full contract.
- *
- * Priority:
- * 1. Visible enemy (we have LOS) — always valid.
- * 2. Recent enemy (combat memory) — invalid if current step is a door and we have no LOS (open door first).
- * 3. Effective scripted step (first not done; never an open door).
- * 4. Fallback only in area0: nearest closed door, else explore toward area1.
- *
- * @returns {{ type: string, x: number, y: number, action?: string, entity?: object, door?: object } | null}
+ * 2. Avoidance Vector: Raycast whiskers to detect walls and push away.
+ * Returns normalized vector {x, y} pointing AWAY from obstacles.
  */
-function getCurrentGoal(state) {
-    const p = state.player;
-    const stepIndex = state.ai._effectiveStepIndex ?? getEffectiveCurrentStepIndex(state);
-    const route = getScriptedRoute();
-    const currentStep = stepIndex >= 0 ? route[stepIndex] : null;
-    const isDoorStep = currentStep && currentStep.doorKey;
+function getAvoidanceVector(p) {
+    const whiskers = [
+        { angle: 0, len: 1.0, weight: 1.0 },
+        { angle: 0.5, len: 0.8, weight: 0.8 },   // ~30 deg
+        { angle: -0.5, len: 0.8, weight: 0.8 },
+        { angle: 1.0, len: 0.6, weight: 0.5 },   // ~60 deg
+        { angle: -1.0, len: 0.6, weight: 0.5 }
+    ];
 
-    // 1) Combat: prefer current target if still in LOS (reduce refocus); else nearest visible, else recent enemy
-    let enemy = getNearestVisibleEnemy(state);
-    const haveVisibleEnemy = !!enemy;
-    // If we're already targeting someone who's still visible, stick to them unless another enemy is much closer
-    if (state.ai.lastEnemyTargetId != null && haveVisibleEnemy) {
-        const current = state.entities?.find((e) => e.id === state.ai.lastEnemyTargetId && e.hp > 0);
-        if (current && hasLineOfSight(p.x, p.y, current.x, current.y) && distanceTo(p.x, p.y, current.x, current.y) <= COMBAT_MAX_RANGE) {
-            const distCurrent = distanceTo(p.x, p.y, current.x, current.y);
-            const distNearest = distanceTo(p.x, p.y, enemy.x, enemy.y);
-            if (distNearest >= distCurrent - COMBAT_SWITCH_CLOSER_TILES) {
-                enemy = current; // keep current target
+    let ax = 0, ay = 0;
+    let count = 0;
+
+    for (const w of whiskers) {
+        const rayAngle = p.angle + w.angle;
+        // Cast ray - Simple hit check: sample points along the ray
+        const checkSteps = 5;
+        for (let i = 1; i <= checkSteps; i++) {
+            const dist = (i / checkSteps) * w.len;
+            const rx = p.x + Math.cos(rayAngle) * dist;
+            const ry = p.y + Math.sin(rayAngle) * dist;
+
+            if (isSolid(rx, ry)) {
+                // Hit! Calculate repulsion vector (opposite to ray)
+                // EXPONENTIAL FALLOFF: The closer the hit, the STRONGER the repulsion
+                // dist 0.1 -> 1/0.1 = 10. dist 1.0 -> 1.
+                const closeness = Math.max(0.01, dist / w.len); // Avoid div by zero
+                const force = (1.0 / closeness) * w.weight;
+
+                ax -= Math.cos(rayAngle) * force;
+                ay -= Math.sin(rayAngle) * force;
+                count++;
+                break; // Stop ray on first hit
             }
         }
     }
-    if (!enemy) enemy = getRecentEnemyIfValid(state);
-    if (enemy) {
-        const haveLOS = haveVisibleEnemy || hasLineOfSight(p.x, p.y, enemy.x, enemy.y);
-        if (isDoorStep && !haveLOS) {
-            // Enemy is behind the door; open the door first instead of shooting at the wall
-            enemy = null;
-            state.ai.lastEnemyTargetId = null;
+
+    // Preserve magnitude to let it override flow/combat!
+    // But clamp it reasonably so it doesn't go to infinity or NaN
+    const len = Math.sqrt(ax * ax + ay * ay);
+    if (len > 0.001) {
+        // Cap max force to avoid glitchy movement, but make it high (e.g. 6.0)
+        // Previous was fixed at 2.0. Now it can scale from 1.0 to 6.0 based on danger.
+        const maxForce = 6.0;
+        if (len > maxForce) {
+            return { x: (ax / len) * maxForce, y: (ay / len) * maxForce };
+        }
+        return { x: ax, y: ay };
+    }
+    return { x: 0, y: 0 };
+}
+
+/**
+ * 3. Combat Spacing Vector: Maintain optimal range from enemy.
+ */
+function getCombatVector(p, goal) {
+    if (goal.type !== 'enemy' && goal.action !== 'fire') return { x: 0, y: 0 };
+
+    // Default optimal distances
+    let optDist = 4.0;
+    const weapon = WEAPONS[p.currentWeapon] || WEAPONS.HANDGUN;
+
+    if (weapon.name === 'SHOTGUN') optDist = 2.5; // Rush
+    if (weapon.name === 'VOID BEAM') optDist = 8.0; // Kite
+    if (weapon.name === 'FIST') optDist = 0.5; // Melee
+
+    const dist = distanceTo(p.x, p.y, goal.x, goal.y);
+    const angleToTarget = angleTo(p.x, p.y, goal.x, goal.y);
+
+    // If too close, push back
+    if (dist < optDist - 1.0) {
+        return {
+            x: -Math.cos(angleToTarget) * 1.5,
+            y: -Math.sin(angleToTarget) * 1.5
+        };
+    }
+    // If too far, pull forward (but Flow vector usually handles this via pathing)
+    return { x: 0, y: 0 };
+}
+
+/**
+ * Context Steering Solver.
+ * Computes final move direction by summing weighted context vectors.
+ * Sets state.ai.input directly.
+ */
+// ── Navigation (Hybrid Track System) ──────────────────────────────
+
+/**
+ * Find the target point on the Main Track.
+ * 1. Find closest track node to Player.
+ * 2. Find closest track node to Goal.
+ * 3. If Player is "behind" Goal on track, move to next node index.
+ * 4. If Goal is off-track (room enter), use A* from track exit.
+ */
+// ── 4. Boss Strategy Vector: Go to nearest lightwell ──
+function getBossZoneVector(p) {
+    let bestZone = null;
+    let minDist = Infinity;
+    for (const z of BOSS_LIGHTWELLS) {
+        const d = distanceTo(p.x, p.y, z.x, z.y);
+        if (d < minDist) {
+            minDist = d;
+            bestZone = z;
         }
     }
-    if (enemy) {
-        state.ai.lastEnemyTargetId = enemy.id;
-        state.ai.lastEnemyTime = state.time.elapsed || 0;
-        return { type: 'enemy', x: enemy.x, y: enemy.y, action: 'fire', entity: enemy };
-    }
-    state.ai.lastEnemyTargetId = null;
 
-    // 2) Scripted step — but never go to button/interact until that room is clear (minimap/level: clear room first)
-    if (stepIndex >= 0) {
-        const step = route[stepIndex];
-        const stepRoomId = step.type === 'button' || step.action === 'interact'
-            ? (step.roomId || getRoomId(step.x, step.y))
-            : null;
-        if (stepRoomId && !isRoomClear(state, stepRoomId)) {
-            const enemyInRoom = getNearestEnemyInRoom(state, stepRoomId);
-            if (enemyInRoom) {
-                state.ai.lastEnemyTargetId = enemyInRoom.id;
-                state.ai.lastEnemyTime = state.time.elapsed || 0;
-                return { type: 'enemy', x: enemyInRoom.x, y: enemyInRoom.y, action: 'fire', entity: enemyInRoom };
-            }
+    if (bestZone) {
+        // Go to zone center
+        const dx = bestZone.x - p.x;
+        const dy = bestZone.y - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0.5) { // If not inside, pull towards it
+            return { x: dx / dist, y: dy / dist };
         }
-        return stepToGoal(step);
+        // If inside, maybe small wiggle to stay centered? Or zero.
+        return { x: dx, y: dy }; // dampens as we get closer
     }
-
-    // 3) Fallback: nearest closed door only when still in area0/hallway (never target a door behind us)
-    // 4) Explore: go toward level's explore fallback room (e.g. area1) if still in start area
-    const room = getRoomId(p.x, p.y);
-    const startRoomId = moodLevel1.roomOrder && moodLevel1.roomOrder[0];
-    if (room === startRoomId || room === null) {
-        const doorGoal = getNearestClosedDoor(state, 10);
-        if (doorGoal) return { type: 'door', x: doorGoal.x, y: doorGoal.y, action: 'interact', door: doorGoal.door };
-        const fallbackRoom = getExploreFallbackRoom(moodLevel1, worldApi);
-        if (fallbackRoom) return { type: 'waypoint', x: fallbackRoom.x + fallbackRoom.w / 2, y: fallbackRoom.y + fallbackRoom.h / 2 };
-    }
-
-    return null;
+    return { x: 0, y: 0 };
 }
 
-// ── Steering ─────────────────────────────────────────────────────────
-// See levels/BFS-AND-STEERING.md: for any door or interact goal, steer target is always
-// the approach tile (never the interact point, which may be solid). Same logic for all levels.
+function getTrackTarget(state, goal) {
+    const track = getMainTrack();
+    if (!track || track.length === 0) return null;
 
-/** True if goal requires standing at an approach tile to interact (door, button, pickup, etc.). */
-function isInteractGoal(goal) {
-    return (goal.type === 'door' && goal.door) || goal.action === 'interact';
-}
-
-/** Approach tile center for an interact goal. Multi-tile doors use gate center (cx, cy) so bot goes to middle. */
-function getInteractApproachCenter(goal, px, py) {
-    if (goal.type === 'door' && goal.door) {
-        const a = getApproachTile(goal.door.cx, goal.door.cy, px, py);
-        return { x: a.x + 0.5, y: a.y + 0.5 };
-    }
-    if (goal.action === 'interact') {
-        const a = getApproachTile(goal.x, goal.y, px, py);
-        return { x: a.x + 0.5, y: a.y + 0.5 };
-    }
-    return { x: goal.x, y: goal.y };
-}
-
-/** When within this many tiles of an interact goal, steer at approach tile only (no look-ahead) so target doesn't jump and trigger replan. */
-const INTERACT_STEER_LOCK_DIST = 5;
-/** When this close to an interact point, never trigger "no progress" replan — we're committed to walking there. */
-const COMMIT_TO_INTERACT_DIST = 5;
-
-/** Centroid of path nodes from idx to idx+window (tile centers). Puts steer target in the middle of the corridor. */
-function pathSegmentCentroid(path, idx, window) {
-    const end = Math.min(idx + window, path.length);
-    let sx = 0, sy = 0, n = 0;
-    for (let i = idx; i < end; i++) {
-        sx += path[i].x + 0.5;
-        sy += path[i].y + 0.5;
-        n++;
-    }
-    if (n === 0) return null;
-    return { x: sx / n, y: sy / n };
-}
-
-/** Nudge (x,y) away from adjacent walls so we don't steer into edges. One tile = 1 unit. */
-function nudgeAwayFromWalls(x, y, amount) {
-    amount = amount ?? 0.4;
-    const tx = Math.floor(x), ty = Math.floor(y);
-    let dx = 0, dy = 0;
-    if (isSolid(tx + 1, ty)) dx -= amount;
-    if (isSolid(tx - 1, ty)) dx += amount;
-    if (isSolid(tx, ty + 1)) dy -= amount;
-    if (isSolid(tx, ty - 1)) dy += amount;
-    if (dx === 0 && dy === 0) return { x, y };
-    return { x: x + dx, y: y + dy };
-}
-
-/** Pick (tx, ty) to steer toward. maxLookAhead: for waypoint goals use 3 so we follow path step-by-step and don't aim through walls. */
-function pickFromPath(path, p, useLookAhead, maxLookAhead) {
-    const look = maxLookAhead ?? LOOK_AHEAD_TILES;
-    if (!path || path.length <= 1) return null;
-    let firstUnreached = -1;
-    for (let i = 1; i < path.length; i++) {
-        const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
-        if (distanceTo(p.x, p.y, cx, cy) > PATH_REACH_DIST) {
-            firstUnreached = i;
-            break;
-        }
-    }
-    if (firstUnreached < 0) return null;
-    let bestIdx = firstUnreached;
-    if (useLookAhead) {
-        for (let i = firstUnreached + 1; i < path.length; i++) {
-            const cx = path[i].x + 0.5, cy = path[i].y + 0.5;
-            const dist = distanceTo(p.x, p.y, cx, cy);
-            if (dist <= look && hasLineOfSight(p.x, p.y, cx, cy)) bestIdx = i;
-            else break;
-        }
-    }
-    const centroid = pathSegmentCentroid(path, bestIdx, PATH_CENTROID_WINDOW);
-    const raw = centroid || { x: path[bestIdx].x + 0.5, y: path[bestIdx].y + 0.5 };
-    return nudgeAwayFromWalls(raw.x, raw.y);
-}
-
-function getSteerTarget(state, goal) {
     const p = state.player;
-    if (goal.type === 'enemy' || goal.action === 'fire') {
-        return { x: goal.x, y: goal.y };
-    }
-    const path = getPathToGoal(state, goal);
-    if (isInteractGoal(goal)) {
-        const approachCenter = getInteractApproachCenter(goal, p.x, p.y);
-        const distToApproach = distanceTo(p.x, p.y, approachCenter.x, approachCenter.y);
-        if (distToApproach <= INTERACT_STEER_LOCK_DIST) {
-            return approachCenter;
+
+    // Find closest index to player
+    let pIdx = -1;
+    let pDist = Infinity;
+    for (let i = 0; i < track.length; i++) {
+        const d = distanceTo(p.x, p.y, track[i].x, track[i].y);
+        if (d < pDist) {
+            pDist = d;
+            pIdx = i;
         }
-        const pathTarget = pickFromPath(path, p, true, LOOK_AHEAD_TILES);
-        if (pathTarget) return pathTarget;
-        return approachCenter;
     }
-    // Waypoint/enter_room: short look-ahead so we follow the path step-by-step and don't steer at a point through the door/wall
-    const pathTarget = pickFromPath(path, p, true, LOOK_AHEAD_TILES_NAV);
-    if (pathTarget) return pathTarget;
-    return { x: goal.x, y: goal.y };
+
+    // Find closest index to goal
+    let gIdx = -1;
+    let gDist = Infinity;
+    for (let i = 0; i < track.length; i++) {
+        const d = distanceTo(goal.x, goal.y, track[i].x, track[i].y);
+        if (d < gDist) {
+            gDist = d;
+            gIdx = i;
+        }
+    }
+
+    // Heuristic: If we are close to the track node (within 1.5 tiles), aim for the NEXT one.
+    // Direction: always forward if gIdx > pIdx.
+    let targetIdx = pIdx;
+
+    if (gIdx > pIdx) {
+        // Moving forward along track
+        if (pDist < 1.5) targetIdx = Math.min(pIdx + 1, gIdx);
+        else targetIdx = pIdx; // Getting back to track
+
+        // Lookahead: if smooth, maybe +2?
+        if (targetIdx < gIdx && distanceTo(p.x, p.y, track[targetIdx].x, track[targetIdx].y) < 2.0) {
+            targetIdx = Math.min(targetIdx + 1, gIdx);
+        }
+    } else if (gIdx < pIdx) {
+        // Moving backward (backtracking)
+        if (pDist < 1.5) targetIdx = Math.max(pIdx - 1, gIdx);
+        else targetIdx = pIdx;
+    } else {
+        // We are at the segment closest to goal.
+        return track[targetIdx];
+    }
 }
 
-/** Set state.ai.input: aim at target and move in any combination of directions (multimodal: move + aim + fire at once). */
 function steerToward(state, goal) {
     if (!goal) return;
     const p = state.player;
     const inp = state.ai.input;
-    const target = getSteerTarget(state, goal);
-    // For any interact goal: when in range, aim at the interact point so we can press E (movement stays approach tile)
-    const interactAim = isInteractGoal(goal)
-        && (goal.door
-            ? distanceTo(p.x, p.y, goal.door.cx, goal.door.cy) <= INTERACTION_RANGE
-            : distanceTo(p.x, p.y, goal.x, goal.y) <= INTERACTION_RANGE);
-    const aimAt = interactAim
-        ? (goal.door ? { x: goal.door.cx, y: goal.door.cy } : { x: goal.x, y: goal.y })
-        : target;
-    const wantAngle = angleTo(p.x, p.y, aimAt.x, aimAt.y);
-    const angleDiff = normalizeAngle(wantAngle - p.angle);
-    const distToTarget = distanceTo(p.x, p.y, target.x, target.y);
     const elapsed = state.time.elapsed || 0;
     const dt = state.time.dt != null ? state.time.dt : (1 / 60);
 
+    // ── 0. Stuck Recovery (Universal) ──
     const isCombat = goal.type === 'enemy' || goal.action === 'fire';
 
-    // ── Stuck detection (navigation only): no progress toward steer target → back up and replan ──
-    if (!isCombat) {
-        const ai = state.ai;
-        const inBackupMode = ai._backUpUntil != null && elapsed < ai._backUpUntil;
-        if (inBackupMode) {
-            // Back up + strafe wiggle to escape corners; keep aiming at target
-            inp.moveBack = true;
-            inp.moveForward = false;
-            const wiggle = Math.floor(elapsed / 0.25) % 2;
-            inp.strafeLeft = wiggle === 0;
-            inp.strafeRight = wiggle === 1;
-            ai._lastSteerTargetDist = distToTarget;
-            if (Math.abs(angleDiff) > AIM_DEAD_ZONE) {
-                const turnGain = TURN_GAIN;
-                let lookDX = angleDiff * turnGain;
-                const maxTurnPerFrame = (Math.abs(angleDiff) * NO_OVERSHOOT_FRAC) / MOUSE_SENSITIVITY;
-                lookDX = Math.max(-maxTurnPerFrame, Math.min(maxTurnPerFrame, lookDX));
-                inp.lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, lookDX));
-            } else inp.lookDX = 0;
-            inp.lookDY = 0;
-            return;
-        }
-        // Null path: BFS returned no path to goal; don't steer at goal forever
-        const distToInteractForNull = isInteractGoal(goal)
-            ? (goal.door ? distanceTo(p.x, p.y, goal.door.cx, goal.door.cy) : distanceTo(p.x, p.y, goal.x, goal.y))
-            : Infinity;
-        const nearInteractNoNullReplan = distToInteractForNull < INTERACT_NULL_PATH_SAFE_DIST;
-        if (ai._pathWasNull && !nearInteractNoNullReplan) {
-            ai._nullPathTime = (ai._nullPathTime || 0) + dt;
-            if (ai._nullPathTime >= NULL_PATH_STUCK_THRESHOLD) {
-                invalidatePathCache();
-                const replans = (ai._replanCount || 0) + 1;
-                ai._replanCount = replans;
-                const backupLen = replans >= REPLAN_COUNT_FOR_EXTRA_BACKUP ? BACKUP_DURATION_EXTRA : BACKUP_DURATION;
-                ai._backUpUntil = elapsed + backupLen;
-                ai._nullPathTime = 0;
-                console.log('[AI] REPLAN — null path to goal for too long, backing up (replan #' + replans + ')');
-            }
+    // Check if we are in backup mode
+    const inBackupMode = state.ai._backUpUntil != null && elapsed < state.ai._backUpUntil;
+    if (inBackupMode) {
+        // Panic Backup: Move back and wiggle to dislodge
+        inp.moveBack = true;
+        inp.moveForward = false;
+        const wiggle = Math.floor(elapsed / 0.25) % 2;
+        inp.strafeLeft = wiggle === 0;
+        inp.strafeRight = wiggle === 1;
+
+        // If in combat, look at enemy; else look at path target
+        let target = null;
+        if (isCombat) {
+            target = { x: goal.x, y: goal.y };
         } else {
-            ai._nullPathTime = 0;
+            target = goal.door ? { x: goal.door.cx, y: goal.door.cy } : { x: goal.x, y: goal.y };
         }
-        if (nearInteractNoNullReplan) ai._nullPathTime = 0;
 
-        // Stay on track: no "no progress" replan. Pathing/steering are central; corners avoided by combat/objective tracks.
-        ai._lastSteerTargetDist = distToTarget;
-    } else {
-        state.ai._lastSteerTargetDist = distToTarget;
-        state.ai._stuckNoProgressTime = 0;
-        state.ai._nullPathTime = 0;
-        state.ai._lastInteractDist = undefined;
-        state.ai._stuckApproachingInteractTime = 0;
-    }
-
-    // ── Aim: always turn toward target (like a player moving the mouse). Never stop aiming when we have a goal. ──
-    if (Math.abs(angleDiff) <= AIM_DEAD_ZONE) {
-        inp.lookDX = 0;
-    } else {
-        const turnGain = isCombat ? TURN_GAIN * 1.2 : TURN_GAIN; // Slightly faster track in combat
-        let lookDX = angleDiff * turnGain;
-        const maxTurnPerFrame = (Math.abs(angleDiff) * NO_OVERSHOOT_FRAC) / MOUSE_SENSITIVITY;
-        lookDX = Math.max(-maxTurnPerFrame, Math.min(maxTurnPerFrame, lookDX));
-        inp.lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, lookDX));
-    }
-    inp.lookDY = 0;
-
-    // ── Movement: allow any combination of forward/back/strafe (diagonal movement like W+A). ──
-    const hasLOSToEnemy = isCombat && hasLineOfSight(p.x, p.y, goal.x, goal.y);
-    const inCombatStandoff = isCombat && (distToTarget <= COMBAT_NO_ADVANCE_DIST || !hasLOSToEnemy);
-
-    if (isCombat) {
-        if (inCombatStandoff) {
-            inp.moveForward = false;
-            if (hasLOSToEnemy && distToTarget < COMBAT_BACK_UP_DIST) {
-                inp.moveBack = true;
-                inp.strafeLeft = false;
-                inp.strafeRight = false;
-            } else if (!hasLOSToEnemy) {
-                // Enemy behind wall: only turn toward last known position, don't advance or back up
-                inp.moveBack = false;
-                inp.strafeLeft = false;
-                inp.strafeRight = false;
-            } else {
-                inp.moveBack = false;
-                // Longer phase (3.5s) + hysteresis: commit to one strafe direction, switch only when angle crosses margin
-                const side = angleDiff; // positive = enemy to our left → strafe right
-                let dir = state.ai._combatStrafeDir;
-                if (dir === undefined) dir = side >= 0 ? 1 : -1;
-                if (dir === 1 && side < -0.22) dir = -1;
-                else if (dir === -1 && side > 0.22) dir = 1;
-                state.ai._combatStrafeDir = dir;
-                inp.strafeLeft = dir === -1;
-                inp.strafeRight = dir === 1;
-            }
-        } else {
-            // Advancing: move forward + circle-strafe toward enemy; don't walk into walls (strafe around edges)
-            inp.moveForward = !isPathBlocked(p.x, p.y, p.angle);
-            inp.moveBack = false;
-            const side = angleDiff;
-            let dir = state.ai._combatStrafeDir;
-            if (dir === undefined) dir = side >= 0 ? 1 : -1;
-            if (dir === 1 && side < -0.2) dir = -1;
-            else if (dir === -1 && side > 0.2) dir = 1;
-            state.ai._combatStrafeDir = dir;
-            inp.strafeLeft = dir === -1;
-            inp.strafeRight = dir === 1;
-        }
+        const wantAngle = angleTo(p.x, p.y, target.x, target.y);
+        const angleDiff = normalizeAngle(wantAngle - p.angle);
+        inp.lookDX = angleDiff * TURN_GAIN;
+        inp.lookDY = 0;
         return;
     }
-    state.ai._combatStrafeDir = undefined; // clear when leaving combat
 
-    // Navigation: move in the direction of the target (forward and/or strafe = diagonal)
-    const forwardComponent = Math.cos(angleDiff);
-    const rightComponent = Math.sin(angleDiff);
-    const thresh = 0.2;
-    inp.moveForward = forwardComponent > thresh && !isPathBlocked(p.x, p.y, p.angle);
-    inp.moveBack = forwardComponent < -thresh;
-    inp.strafeRight = rightComponent > thresh;
-    inp.strafeLeft = rightComponent < -thresh;
-    if (inp.moveBack && (inp.strafeLeft || inp.strafeRight)) {
-        inp.moveForward = false;
+    // Physical Stuck Check: Are we failing to move despite inputs?
+    // We run this for BOTH combat and navigation.
+    const CHECK_INTERVAL = 0.5;
+    if (!state.ai._lastPosCheckTime) state.ai._lastPosCheckTime = elapsed;
+    if (elapsed - state.ai._lastPosCheckTime > CHECK_INTERVAL) {
+        const lastPos = state.ai._lastPos || { x: p.x, y: p.y };
+        const distMoved = distanceTo(p.x, p.y, lastPos.x, lastPos.y);
+
+        // Threshold: 0.1 tiles in 0.5s is very slow (stuck)
+        // Only trigger if we aren't already very close to the goal (nav) or holding position (intentional stop)
+        // For combat, we usually strafe, so we SHOULD be moving.
+
+        let isIntentionallyStopped = false;
+        if (state.ai.input && !state.ai.input.moveForward && !state.ai.input.moveBack && !state.ai.input.strafeLeft && !state.ai.input.strafeRight) {
+            isIntentionallyStopped = true;
+        }
+
+        // If we are commanding movement but not moving -> Stuck
+        // For combat, we expect higher mobility, so threshold is higher (0.15 tiles)
+        const STUCK_DIST_THRESH = isCombat ? 0.25 : 0.1;
+
+        if (!isIntentionallyStopped && distMoved < STUCK_DIST_THRESH) {
+            state.ai._stuckTimer = (state.ai._stuckTimer || 0) + CHECK_INTERVAL;
+            if (state.ai._stuckTimer > 1.0) { // 1 sec stuck -> Panic
+                invalidatePathCache();
+                state.ai._backUpUntil = elapsed + BACKUP_DURATION;
+                state.ai._stuckTimer = 0;
+                // console.log('[AI] IMPACT STUCK — stationary for >1s, backing up' + (isCombat ? ' (COMBAT)' : ''));
+            }
+        } else {
+            state.ai._stuckTimer = 0;
+        }
+
+        state.ai._lastPos = { x: p.x, y: p.y };
+        state.ai._lastPosCheckTime = elapsed;
     }
+
+    if (!isCombat) {
+        // Nav-specific "No Progress" logic (Distance to goal) -> Already handled by Physical Stuck Check largely,
+        // but kept for "looping" stucks where we move but don't get closer?
+        // Actually, the previous 'No Progress' check (distance based) is good for that.
+        // Let's keep the Null Path check here.
+
+        // Stuck detection (null path)
+        if (state.ai._pathWasNull && !isInteractGoal(goal)) {
+            state.ai._nullPathTime = (state.ai._nullPathTime || 0) + dt;
+            if (state.ai._nullPathTime >= NULL_PATH_STUCK_THRESHOLD) {
+                invalidatePathCache();
+                const replans = (state.ai._replanCount || 0) + 1;
+                state.ai._replanCount = replans;
+                const backupLen = replans >= REPLAN_COUNT_FOR_EXTRA_BACKUP ? BACKUP_DURATION_EXTRA : BACKUP_DURATION;
+                state.ai._backUpUntil = elapsed + backupLen;
+                state.ai._nullPathTime = 0;
+            }
+        } else {
+            state.ai._nullPathTime = 0;
+        }
+    }
+
+    // ── 1. Calculate Control Vectors ──
+
+    // A. Flow (Path Following)
+    const path = getPathToGoal(state, goal);
+    let flow = getFlowVector(path, p);
+
+    // B. Avoidance (Wall Repulsion)
+    const avoid = getAvoidanceVector(p);
+
+    // C. Combat Spacing or Boss Zone
+    const isBoss = goal.entity && goal.entity.type === 'BOSS';
+    let combat = { x: 0, y: 0 };
+
+    if (isCombat) {
+        if (isBoss) {
+            // override combat spacing with Boss Zone logic
+            combat = getBossZoneVector(p);
+            // disable flow for boss fight (we want to stick to zones, not path)
+            flow = { x: 0, y: 0 };
+        } else {
+            combat = getCombatVector(p, goal);
+        }
+    }
+
+    // ── 2. Combine Vectors (Weighted Sum) ──
+    const W_FLOW = 1.0;
+    const W_AVOID = 2.0; // Stronger avoidance
+    const W_COMBAT = isBoss ? 2.5 : 0.8; // Strong pull to zones for boss
+
+    let moveX = flow.x * W_FLOW + avoid.x * W_AVOID + combat.x * W_COMBAT;
+    let moveY = flow.y * W_FLOW + avoid.y * W_AVOID + combat.y * W_COMBAT;
+
+    // Normalize final movement vector
+    const len = Math.sqrt(moveX * moveX + moveY * moveY);
+    if (len > 0.001) {
+        moveX /= len;
+        moveY /= len;
+    } else {
+        moveX = 0; moveY = 0;
+    }
+
+    // ── 3. Interaction Override ──
+    // If interact goal and VERY close, stop context steering and just align to Interact
+    if (isInteractGoal(goal) && distanceTo(p.x, p.y, goal.x, goal.y) < 1.0) {
+        moveX = 0; moveY = 0; // Stop moving, just aim
+
+        // Exact aim for interaction
+        const tx = goal.door ? goal.door.cx : goal.x;
+        const ty = goal.door ? goal.door.cy : goal.y;
+        const wantAngle = angleTo(p.x, p.y, tx, ty);
+        const angleDiff = normalizeAngle(wantAngle - p.angle);
+
+        // Turn to target
+        let lookDX = (angleDiff * TURN_GAIN) / MOUSE_SENSITIVITY;
+        lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, lookDX));
+        inp.lookDX = lookDX;
+        inp.lookDY = 0;
+
+        // Stop movement
+        inp.moveForward = false;
+        inp.moveBack = false;
+        inp.strafeLeft = false;
+        inp.strafeRight = false;
+        return;
+    }
+
+    // ── 4. Apply to Inputs ──
+
+    // A. Aiming (Look where we are going OR at enemy)
+    let lookTargetX = p.x + moveX;
+    let lookTargetY = p.y + moveY;
+
+    // If in combat, always look at enemy regardless of move direction (strafe support)
+    if (goal.type === 'enemy' || goal.action === 'fire') {
+        lookTargetX = goal.x;
+        lookTargetY = goal.y;
+    }
+    // If interacting and close, look at interact (covered by override above usually, but flow might push us)
+    else if (isInteractGoal(goal)) {
+        const tx = goal.door ? goal.door.cx : goal.x;
+        const ty = goal.door ? goal.door.cy : goal.y;
+        lookTargetX = tx;
+        lookTargetY = ty;
+    }
+
+    const wantAngleKey = angleTo(p.x, p.y, lookTargetX, lookTargetY);
+    const angleDiffKey = normalizeAngle(wantAngleKey - p.angle);
+
+    let lookDX = (angleDiffKey * TURN_GAIN) / MOUSE_SENSITIVITY;
+    // Clamp turn speed
+    lookDX = Math.max(-LOOK_DX_MAX, Math.min(LOOK_DX_MAX, lookDX));
+    inp.lookDX = lookDX;
+    inp.lookDY = 0;
+
+    // B. Velocity Projection (Dot Product)
+    // Map the absolute world movement vector (moveX, moveY) into local player space (Forward, Right)
+    // Forward component = Dot(Move, PlayerDir)
+    // Right component = Dot(Move, PlayerRight)
+    const pDirX = Math.cos(p.angle);
+    const pDirY = Math.sin(p.angle);
+    const pRightX = Math.cos(p.angle + Math.PI / 2);
+    const pRightY = Math.sin(p.angle + Math.PI / 2);
+
+    const fwdDot = moveX * pDirX + moveY * pDirY;
+    const rightDot = moveX * pRightX + moveY * pRightY;
+
+    const thresh = 0.1;
+    inp.moveForward = fwdDot > thresh;
+    inp.moveBack = fwdDot < -thresh;
+    inp.strafeRight = rightDot > thresh;
+    inp.strafeLeft = rightDot < -thresh;
+
+    // Debug
+    state.ai.telemetry = state.ai.telemetry || {};
+    state.ai.telemetry.context = { flow, avoid, combat, final: { x: moveX, y: moveY } };
 }
 
 // ── Actions ──────────────────────────────────────────────────────────
@@ -787,7 +695,9 @@ function performAction(state, goal) {
     if (goal.action === 'interact') {
         const tx = goal.door ? goal.door.cx : goal.x;
         const ty = goal.door ? goal.door.cy : goal.y;
-        if (isInRangeAndFacing(p.x, p.y, p.angle, tx, ty, AI_TUNING.interactFacingTolerance)) {
+        // Doors: use same wide angle as triggers.js (Math.PI * 0.8) so we actually trigger; strict 30° caused stuck-at-door.
+        const angleTolerance = goal.door ? Math.PI * 0.8 : AI_TUNING.interactFacingTolerance;
+        if (isInRangeAndFacing(p.x, p.y, p.angle, tx, ty, angleTolerance)) {
             inp.interact = true;
         }
         return;
@@ -800,6 +710,15 @@ function performAction(state, goal) {
         const canHit = hasLineOfSight(p.x, p.y, goal.x, goal.y);
         if (canHit && dist <= COMBAT_MAX_RANGE && Math.abs(normalizeAngle(wantAngle - p.angle)) <= aimTolerance) {
             inp.fire = true;
+        }
+
+        // Auto-switch to best weapon for boss
+        if (goal.entity && goal.entity.type === 'BOSS') {
+            const weapons = state.player.weapons || [];
+            const vbIndex = weapons.indexOf('VOIDBEAM');
+            if (vbIndex !== -1) {
+                inp.weaponSlot = vbIndex; // 0-based index for logic, input system usually handles mapping
+            }
         }
     }
 }
@@ -820,16 +739,69 @@ function resetAiInput(inp) {
 
 // ── Main update ──────────────────────────────────────────────────────
 
+function getCurrentGoalWithLogic(state) {
+    // 1. Clear Room First (Phase 4 Logic)
+    const roomId = getRoomId(state.player.x, state.player.y);
+    // Find enemies in this room that aren't dead
+    // state.entities has all ents.
+    // simplistic check: if enemy is in current room ID, target it.
+
+    if (state.entities && roomId) {
+        let bestEnemy = null;
+        let minDist = Infinity;
+
+        for (const e of state.entities) {
+            // Target any living entity that isn't the player or an item.
+            // Assuming entities with HP > 0 are enemies.
+            if (e.hp > 0 && e.type !== 'player') {
+                const eRoom = getRoomId(e.x, e.y);
+                if (eRoom === roomId) {
+                    const d = distanceTo(state.player.x, state.player.y, e.x, e.y);
+                    if (d < minDist) {
+                        minDist = d;
+                        bestEnemy = e;
+                    }
+                }
+            }
+        }
+
+        if (bestEnemy) {
+            return { type: 'enemy', x: bestEnemy.x, y: bestEnemy.y, entity: bestEnemy, action: 'fire' };
+        }
+    }
+
+    // 2. Otherwise, follow script
+    // Replaces getCurrentGoal(state) call in the update loop? 
+    // No, we should call getCurrentGoal(state) which is imported from ai_script.js
+    // But we override it here.
+
+    // We need to import getCurrentGoal from ai_script.js? 
+    // It's not imported in the provided code snippet unless I missed it.
+    // Ah, line 29 of my previous view: `import { ... } from './ai_script.js'`.
+    // Wait, `getCurrentGoal` was NOT in the imports list I wrote above.
+    // I need to check `ai.js` imports again.
+    // Ah, `getCurrentGoal` was not imported in my `write_to_file` block above. I need to add it.
+
+    return getCurrentGoal(state);
+}
+
 /**
  * Update AI. When active, sets state.ai.input and state.ai.telemetry.
  */
 export function update(state) {
-    if (!state.ai.active) return;
+    if (!state.ai.active) {
+        // console.log('AI inactive'); // minimal spam
+        return;
+    }
 
     const inp = state.ai.input;
     resetAiInput(inp);
 
-    // Sticky enter_room: record when we're in each room so we stay "done" for 3s after leaving (avoids step flip on backup)
+    // DEBUG: Print current goal
+    // let goal = getCurrentGoalWithLogic(state);
+    // console.log('AI Update. Goal:', goal); 
+
+    // Sticky enter_room etc... (Keep existing logic)
     const room = getRoomId(state.player.x, state.player.y);
     if (room) {
         if (!state.ai._enteredRoomAt) state.ai._enteredRoomAt = {};
@@ -837,7 +809,7 @@ export function update(state) {
     }
 
     const stepIndex = getEffectiveCurrentStepIndex(state);
-    state.ai._effectiveStepIndex = stepIndex; // cache for this frame so getCurrentGoal/getPathToGoal don't recompute
+    state.ai._effectiveStepIndex = stepIndex;
     if (stepIndex !== lastCachedStepIndex) {
         const prevStep = lastCachedStepIndex >= 0 ? getScriptedRoute()[lastCachedStepIndex] : null;
         if (prevStep && prevStep.doorKey) {
@@ -850,35 +822,23 @@ export function update(state) {
         state.ai._lastInteractDist = undefined;
     }
 
-    let goal = getCurrentGoal(state);
+    // High-Level Logic Selection
+    let goal = getCurrentGoalWithLogic(state);
+    if (Math.random() < 0.01) console.log('[AI DEBUG] Goal:', goal); // Throttled log
 
-    // When enemy is behind wall: navigate to last known position so we move around the wall to re-engage
-    if (goal && (goal.type === 'enemy' || goal.action === 'fire') && !hasLineOfSight(state.player.x, state.player.y, goal.x, goal.y)) {
-        goal = { type: 'waypoint', x: goal.x, y: goal.y };
-    }
-
-    if (goal && goal.action === 'interact' && goal.x === 0 && goal.y === 0) {
-        if (!state.ai._warnedInteractZero) {
-            state.ai._warnedInteractZero = true;
-            console.warn('[AI] Interact goal has position (0,0); likely missing getInteractable(id) or position in level data.');
-        }
-    }
-
-    if (stepIndex < 0 && goal === null) {
-        const room = getRoomId(state.player.x, state.player.y);
-        const startId = moodLevel1.roomOrder && moodLevel1.roomOrder[0];
-        if (room !== startId && room !== null) {
-            state.ai._noStepLogT = state.ai._noStepLogT || 0;
-            state.ai._noStepLogT += state.time.dt || 0;
-            if (state.ai._noStepLogT >= 5) {
-                console.warn('[AI] NO STEP — no scripted step for this level; bot has no goal. Add steps to level data.');
-                state.ai._noStepLogT = 0;
-            }
+    // Last Known position logic (enemy tracking)
+    if (goal && (goal.type === 'enemy' || goal.action === 'fire')) {
+        const haveLOS = hasLineOfSight(state.player.x, state.player.y, goal.x, goal.y);
+        if (haveLOS) {
+            state.ai._lastKnownEnemyPos = null;
         } else {
-            state.ai._noStepLogT = 0;
+            if (!state.ai._lastKnownEnemyPos) state.ai._lastKnownEnemyPos = { x: goal.x, y: goal.y };
+            // If we lost LOS, go to last known position (Hunt)
+            goal = { type: 'waypoint', x: state.ai._lastKnownEnemyPos.x, y: state.ai._lastKnownEnemyPos.y };
         }
     }
 
+    // Door stuck logic...
     if (goal && goal.type === 'door' && goal.door) {
         const dist = distanceTo(state.player.x, state.player.y, goal.door.cx, goal.door.cy);
         const inRange = dist <= INTERACTION_RANGE;
@@ -893,10 +853,7 @@ export function update(state) {
                 const backupLen = state.ai._doorAttemptCount >= REPLAN_COUNT_FOR_EXTRA_BACKUP ? BACKUP_DURATION_EXTRA : BACKUP_DURATION;
                 state.ai._backUpUntil = elapsed + backupLen;
                 state.ai._replanCount = (state.ai._replanCount || 0) + 1;
-                console.log('[AI] REPLAN — stuck at door, backing up to re-approach (attempt ' + state.ai._doorAttemptCount + ')');
-                if (state.ai._doorAttemptCount >= DOOR_FALLBACK_AFTER_ATTEMPTS) {
-                    console.warn('[AI] FAILURE/FALLBACK — door still not open after ' + DOOR_FALLBACK_AFTER_ATTEMPTS + ' attempts; continuing to retry.');
-                }
+                // console.log('[AI] REPLAN — stuck at door...');
             }
         } else {
             state.ai._atDoorSince = null;
@@ -904,63 +861,17 @@ export function update(state) {
     } else {
         state.ai._atDoorSince = null;
     }
+
     if (goal) {
         steerToward(state, goal);
         performAction(state, goal);
     }
-    const route = getScriptedRoute();
-    const stepLabel = stepIndex >= 0 ? route[stepIndex].label : null;
-    const rawStepIndex = getCurrentScriptedStepIndex(state);
-    const roomId = getRoomId(state.player.x, state.player.y);
 
-    // Debug: goal summary; for door goals show THIS door's state, not a hardcoded tile
-    let goalSummary = 'none';
-    let goalDoorOpen = null;
-    if (goal) {
-        if (goal.type === 'enemy' && goal.entity) goalSummary = `enemy ${goal.entity.id}`;
-        else if (goal.door) {
-            goalSummary = `door ${goal.door.cx.toFixed(0)},${goal.door.cy.toFixed(0)}`;
-            goalDoorOpen = goal.door.openProgress >= 1;
-        } else if (goal.type === 'waypoint') goalSummary = `waypoint ${goal.x.toFixed(0)},${goal.y.toFixed(0)}`;
-        else goalSummary = goal.type || '?';
-    }
-    const door0 = doors['8,5'];
-
+    // Telemetry updates...
+    // Only minimal debug for performance/cleanliness
     state.ai.telemetry = {
         state: goal ? goal.type : 'idle',
-        step: stepLabel,
-        targetId: goal && goal.entity ? goal.entity.id : null,
         confidence: goal ? 1 : 0,
-        stuckTimer: state.ai._stuckNoProgressTime ?? 0,
-        replanCount: state.ai._replanCount ?? 0,
+        ...state.ai.telemetry
     };
-
-    const inBackup = state.ai._backUpUntil != null && (state.time.elapsed || 0) < state.ai._backUpUntil;
-    state.ai.debug = {
-        rawStepIndex,
-        effectiveStepIndex: stepIndex,
-        stepLabel,
-        goalType: goal ? goal.type : null,
-        goalSummary,
-        roomId: roomId || 'null',
-        skippedSteps: state.ai._debugStepSkip || [],
-        goalDoorOpen: goalDoorOpen,
-        door_8_5_open: door0 ? door0.openProgress >= 1 : 'no ref',
-        door_8_5_progress: door0 ? door0.openProgress.toFixed(2) : '—',
-        lastEnemyId: state.ai.lastEnemyTargetId,
-        stuckTimer: (state.ai._stuckNoProgressTime ?? 0).toFixed(2),
-        replanCount: state.ai._replanCount ?? 0,
-        backingUp: inBackup,
-    };
-
-    // Throttled console log (every ~2s) to trace regression without flooding
-    if (!state.ai._debugLogT) state.ai._debugLogT = 0;
-    state.ai._debugLogT += state.time.dt || 0;
-    if (state.ai._debugLogT >= 2) {
-        state.ai._debugLogT = 0;
-        const doorStatus = goalDoorOpen != null ? ` goalDoorOpen=${goalDoorOpen}` : '';
-        console.log(
-            `[AI] room=${roomId || 'null'} rawStep=${rawStepIndex} effectiveStep=${stepIndex} step=${stepLabel || '—'} goal=${goalSummary}${doorStatus} skipped=[${(state.ai._debugStepSkip || []).join(', ')}]`
-        );
-    }
-}
+} // End update

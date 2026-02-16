@@ -11,7 +11,8 @@ import {
 } from './config.js';
 
 import * as input from './input.js';
-import { PLAYER_SPAWN, resetDoors } from './map.js';
+import * as map from './map.js';
+const { PLAYER_SPAWN, resetDoors } = map;
 import * as renderer from './renderer.js';
 import * as player from './player.js';
 import * as hud from './hud.js';
@@ -71,7 +72,7 @@ const state = {
     },
     entities: [],
     projectiles: [],
-    map: null,        // set during init from map.js
+    map: map,        // set during init from map.js
     pickups: [],
     hud: {
         killCount: 0,
@@ -601,7 +602,7 @@ if (typeof window !== 'undefined') {
             results.forEach((r) => console.log(`  ${r.scenario}: ${r.pass ? 'PASS' : 'FAIL'} — ${r.message}`));
             return results;
         };
-    }).catch(() => {});
+    }).catch(() => { });
 }
 
 // ── Export state for other modules ──────────────────────────────────

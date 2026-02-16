@@ -56,11 +56,11 @@ function placeTile(x, y, tile) {
 export const ROOMS = {
     area0: { id: 'area0', label: 'AREA 0 — AWAKENING' },
     area1: { id: 'area1', label: 'AREA 1 — THE THRESHOLD' },
-    a2r1:  { id: 'a2r1',  label: 'AREA 2 — HALL OF ECHOES' },
-    a2r2:  { id: 'a2r2',  label: 'AREA 2 — THE DRIFT' },
-    a2r3:  { id: 'a2r3',  label: 'AREA 2 — NEXUS' },
-    a2r4:  { id: 'a2r4',  label: 'AREA 2 — PRISM CHAMBER' },
-    a2r5:  { id: 'a2r5',  label: 'AREA 2 — THE PASSAGE' },
+    a2r1: { id: 'a2r1', label: 'AREA 2 — HALL OF ECHOES' },
+    a2r2: { id: 'a2r2', label: 'AREA 2 — THE DRIFT' },
+    a2r3: { id: 'a2r3', label: 'AREA 2 — NEXUS' },
+    a2r4: { id: 'a2r4', label: 'AREA 2 — PRISM CHAMBER' },
+    a2r5: { id: 'a2r5', label: 'AREA 2 — THE PASSAGE' },
     bossCorridor: { id: 'bossCorridor', label: 'DESCENDING...' },
     area3: { id: 'area3', label: 'THE EGO' },
 };
@@ -476,11 +476,11 @@ export { grid };
 export const ROOM_BOUNDS = {
     area0: { x: A0_X, y: A0_Y, w: A0_W, h: A0_H },
     area1: { x: A1_X, y: A1_Y, w: A1_W, h: A1_H },
-    a2r1:  { x: A2R1_X, y: A2R1_Y, w: A2R1_W, h: A2R1_H },
-    a2r2:  { x: A2R2_X, y: A2R2_Y, w: A2R2_W, h: A2R2_H },
-    a2r3:  { x: A2R3_X, y: A2R3_Y, w: A2R3_W, h: A2R3_H },
-    a2r4:  { x: A2R4_X, y: A2R4_Y, w: A2R4_W, h: A2R4_H },
-    a2r5:  { x: A2R5_X, y: A2R5_Y, w: A2R5_W, h: A2R5_H },
+    a2r1: { x: A2R1_X, y: A2R1_Y, w: A2R1_W, h: A2R1_H },
+    a2r2: { x: A2R2_X, y: A2R2_Y, w: A2R2_W, h: A2R2_H },
+    a2r3: { x: A2R3_X, y: A2R3_Y, w: A2R3_W, h: A2R3_H },
+    a2r4: { x: A2R4_X, y: A2R4_Y, w: A2R4_W, h: A2R4_H },
+    a2r5: { x: A2R5_X, y: A2R5_Y, w: A2R5_W, h: A2R5_H },
     bossCorridor: { x: BC_X, y: BC_Y, w: BC_W, h: BC_H },
     area3: { x: A3_X, y: A3_Y, w: A3_W, h: A3_H },
 };
@@ -499,42 +499,48 @@ export const INTERACTABLE_POSITIONS = {
 // Enemy spawn positions per room
 export const ENEMY_SPAWNS = {
     area1: [
-        { type: 'GLIMMER', x: A1_X + 3,  y: A1_Y + 3 },
+        { type: 'GLIMMER', x: A1_X + 3, y: A1_Y + 3 },
         { type: 'GLIMMER', x: A1_X + 11, y: A1_Y + 3 },
-        { type: 'GLIMMER', x: A1_X + 3,  y: A1_Y + 11 },
+        { type: 'GLIMMER', x: A1_X + 3, y: A1_Y + 11 },
         { type: 'GLIMMER', x: A1_X + 11, y: A1_Y + 11 },
     ],
     a2r1: [
-        { type: 'GLIMMER', x: A2R1_X + 3,  y: A2R1_Y + 2 },
-        { type: 'GLIMMER', x: A2R1_X + 6,  y: A2R1_Y + 5 },
-        { type: 'GLIMMER', x: A2R1_X + 9,  y: A2R1_Y + 3 },
-        { type: 'PHANTOM', x: A2R1_X + 6,  y: A2R1_Y + 2 },
+        { type: 'GLIMMER', x: A2R1_X + 3, y: A2R1_Y + 2 },
+        { type: 'GLIMMER', x: A2R1_X + 6, y: A2R1_Y + 5 },
+        { type: 'GLIMMER', x: A2R1_X + 9, y: A2R1_Y + 3 },
+        { type: 'PHANTOM', x: A2R1_X + 6, y: A2R1_Y + 2 },
     ],
     a2r2: [
-        { type: 'GLIMMER', x: A2R2_X + 2,  y: A2R2_Y + 3 },
-        { type: 'GLIMMER', x: A2R2_X + 5,  y: A2R2_Y + 7 },
-        { type: 'GLIMMER', x: A2R2_X + 3,  y: A2R2_Y + 10 },
-        { type: 'GLIMMER', x: A2R2_X + 6,  y: A2R2_Y + 9 },
+        { type: 'GLIMMER', x: A2R2_X + 2, y: A2R2_Y + 3 },
+        { type: 'GLIMMER', x: A2R2_X + 5, y: A2R2_Y + 7 },
+        { type: 'GLIMMER', x: A2R2_X + 3, y: A2R2_Y + 10 },
+        { type: 'GLIMMER', x: A2R2_X + 6, y: A2R2_Y + 9 },
     ],
     a2r3: [
-        { type: 'GLIMMER', x: A2R3_X + 2,  y: A2R3_Y + 2 },
-        { type: 'GLIMMER', x: A2R3_X + 9,  y: A2R3_Y + 9 },
-        { type: 'PHANTOM', x: A2R3_X + 2,  y: A2R3_Y + 9 },
-        { type: 'PHANTOM', x: A2R3_X + 9,  y: A2R3_Y + 2 },
+        { type: 'GLIMMER', x: A2R3_X + 2, y: A2R3_Y + 2 },
+        { type: 'GLIMMER', x: A2R3_X + 9, y: A2R3_Y + 9 },
+        { type: 'PHANTOM', x: A2R3_X + 2, y: A2R3_Y + 9 },
+        { type: 'PHANTOM', x: A2R3_X + 9, y: A2R3_Y + 2 },
     ],
     a2r4: [
-        { type: 'GLIMMER', x: A2R4_X + 2,  y: A2R4_Y + 2 },
-        { type: 'GLIMMER', x: A2R4_X + 7,  y: A2R4_Y + 7 },
-        { type: 'PRISM',   x: A2R4_X + 5,  y: A2R4_Y + 5 },
+        { type: 'GLIMMER', x: A2R4_X + 2, y: A2R4_Y + 2 },
+        { type: 'GLIMMER', x: A2R4_X + 7, y: A2R4_Y + 7 },
+        { type: 'PRISM', x: A2R4_X + 5, y: A2R4_Y + 5 },
     ],
     a2r5: [
-        { type: 'PHANTOM', x: A2R5_X + 3,  y: A2R5_Y + 3 },
-        { type: 'PHANTOM', x: A2R5_X + 7,  y: A2R5_Y + 3 },
-        { type: 'PHANTOM', x: A2R5_X + 5,  y: A2R5_Y + 6 },
+        { type: 'PHANTOM', x: A2R5_X + 3, y: A2R5_Y + 3 },
+        { type: 'PHANTOM', x: A2R5_X + 7, y: A2R5_Y + 3 },
+        { type: 'PHANTOM', x: A2R5_X + 5, y: A2R5_Y + 6 },
     ],
     area3: [
         { type: 'BOSS', x: BOSS_SPAWN.x, y: BOSS_SPAWN.y },
     ],
 };
+
+export const BOSS_LIGHTWELLS = [
+    { x: A3_X + 2.5, y: A3_Y + 2.5 },   // NW
+    { x: A3_X + 13.5, y: A3_Y + 2.5 },  // NE
+    { x: A3_X + 7.5, y: A3_Y + 12.5 }   // S-Center
+];
 
 export { BOSS_SPAWN };
